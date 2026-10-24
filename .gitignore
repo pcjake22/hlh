@@ -1,0 +1,20 @@
+# Python bytecode & caching
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# PyInstaller / EXE generation builds
+build/
+dist/
+*.spec
+
+# Local Environment & system files
+.venv/
+venv/
+ENV/
+.env
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store

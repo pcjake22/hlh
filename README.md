@@ -4,7 +4,7 @@
 
 # Hockey Live Hub (HLH) 🏒
 
-A minimalist desktop scoreboard and live stream router for hockey (NHL, NCAA D1, AHL, ECHL, SPHL, and international leagues).
+A lightweight, minimalist desktop scoreboard and stream router for hockey fans. Track live games across the NHL, NCAA Men's Division 1, and global professional leagues with zero visual clutter.
 
 <p align="center">
   <a href="https://github.com/pcjake22/hlh/releases">
@@ -16,8 +16,8 @@ A minimalist desktop scoreboard and live stream router for hockey (NHL, NCAA D1,
   <a href="https://github.com/pcjake22/hlh/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge&labelColor=0d1117" alt="License">
   </a>
-  <a href="https://github.com/pcjake22/hlh/stargazers">
-    <img src="https://img.shields.io/github/stars/pcjake22/hlh?style=for-the-badge&logo=star&color=eab308&labelColor=0d1117" alt="Stars">
+  <a href="https://buymeacoffee.com/Sadpipo">
+    <img src="https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee">
   </a>
 </p>
 
@@ -25,18 +25,28 @@ A minimalist desktop scoreboard and live stream router for hockey (NHL, NCAA D1,
 
 ---
 
-## ⚡ Highlights
-* **Official NHL Web API:** Real-time scores, clock telemetry, period states, and team branding.
-* **NCAA Men's D1 & Minor Leagues:** Integrated schedules for college hockey, AHL, ECHL, SPHL, and overseas junior leagues.
-* **Matchora & OnHockey Stream Router:** Resolves active direct embed links for live games.
-* **Automated Game Recaps:** Completed matches swap stream links for direct, full-length 10-minute condensed game highlights.
-* **Momentum Indicator:** Drop-down period game-flow visualizer tracking scoring pressure and game momentum.
+## ⚡ Key Features
+
+- **Official NHL Data Feed:** Real-time scores, clock telemetry, and game states directly via the official NHL Web API.
+- **NCAA Men's Division 1 & Global Leagues:** Live score coverage spanning college hockey, AHL, ECHL, SPHL, QMJHL, OHL/WHL Juniors, SHL, Liiga, and Swiss NL.
+- **Direct Stream Matching:** The **Watch** button resolves direct embed links via Matchora when available and falls back smoothly.
+- **Dedicated Routing:** Pro and minor league cards include a dedicated **OnHockey** button for quick alternative access; NCAA cards are streamlined to a single watch button.
+- **10-Minute Condensed Recaps:** Finished games automatically display a **▶ Recap** button linking directly to official game highlights.
+- **Interactive Momentum Wave:** Expandable cards reveal period-by-period scoring flow and momentum charts.
+- **Native Desktop Integration:** Configured with a dedicated Windows `AppUserModelID` and custom taskbar icon.
 
 ---
 
-## 🚀 Quick Start (Running from Source)
+## 🚀 Getting Started
 
-### 1. Requirements
-Ensure you have Python 3.10 or newer installed, then install dependencies:
-```bash
-pip install PyQt6 requests
+### Prerequisites
+
+- Python 3.10 or newer
+- `pip`
+
+### Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone [https://github.com/pcjake22/hlh.git](https://github.com/pcjake22/hlh.git)
+   cd hlh

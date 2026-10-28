@@ -1,21 +1,34 @@
 import sys
 import os
+import re
+import shutil
 import subprocess
+import webbrowser
 import requests
 import math
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
 from PyQt6 import sip
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl, QRectF, QPointF
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl, QPointF, QSettings
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QLabel, QPushButton, QScrollArea, QFrame, QMessageBox, QComboBox
+    QLabel, QPushButton, QScrollArea, QFrame, QMessageBox, QComboBox,
+    QMenu, QDialog, QDialogButtonBox
 )
 from PyQt6.QtGui import (
     QFont, QPixmap, QCursor, QPainter, QColor, QPen, QBrush, 
-    QPainterPath, QLinearGradient
+    QPainterPath, QLinearGradient, QIcon, QAction
 )
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
+
+# Windows taskbar grouping
+if sys.platform == "win32":
+    import ctypes
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("pcjake22.hlh.desktop.beta")
+    except Exception:
+        pass
 
 API_BASE = "https://matchora.to/api/v1"
 ESPN_NCAA_API = "https://site.api.espn.com/apis/site/v2/sports/hockey/mens-college-hockey/scoreboard"
@@ -23,164 +36,203 @@ ESPN_NCAA_API = "https://site.api.espn.com/apis/site/v2/sports/hockey/mens-colle
 NETWORK_MANAGER = None
 IMAGE_CACHE = {}
 
-# Full name mapping for all 32 NHL franchises
+TIMEZONE_OFFSETS = {
+    "Local System Time": None,
+    "US Eastern (ET - UTC-4/5)": -5,
+    "US Central (CT - UTC-5/6)": -6,
+    "US Mountain (MT - UTC-6/7)": -7,
+    "US Pacific (PT - UTC-7/8)": -8,
+    "Alaska (AKT - UTC-8/9)": -9,
+    "Hawaii (HST - UTC-10)": -10,
+    "UTC / GMT": 0,
+    "Central European (CET - UTC+1/2)": 1
+}
+
 NHL_FRANCHISES = {
-    "ana": "Anaheim Ducks",
-    "bos": "Boston Bruins",
-    "buf": "Buffalo Sabres",
-    "car": "Carolina Hurricanes",
-    "cbj": "Columbus Blue Jackets",
-    "cgy": "Calgary Flames",
-    "chi": "Chicago Blackhawks",
-    "col": "Colorado Avalanche",
-    "dal": "Dallas Stars",
-    "det": "Detroit Red Wings",
-    "edm": "Edmonton Oilers",
-    "fla": "Florida Panthers",
-    "la": "Los Angeles Kings",
-    "lak": "Los Angeles Kings",
-    "min": "Minnesota Wild",
-    "mtl": "Montreal Canadiens",
-    "njd": "New Jersey Devils",
-    "nj": "New Jersey Devils",
-    "nsh": "Nashville Predators",
-    "nyi": "New York Islanders",
-    "nyr": "New York Rangers",
-    "ott": "Ottawa Senators",
-    "phi": "Philadelphia Flyers",
-    "pit": "Pittsburgh Penguins",
-    "sea": "Seattle Kraken",
-    "sjs": "San Jose Sharks",
-    "sj": "San Jose Sharks",
-    "stl": "St. Louis Blues",
-    "tbl": "Tampa Bay Lightning",
-    "tb": "Tampa Bay Lightning",
-    "tor": "Toronto Maple Leafs",
-    "uta": "Utah Hockey Club",
-    "van": "Vancouver Canucks",
-    "vgk": "Vegas Golden Knights",
-    "wpg": "Winnipeg Jets",
-    "wsh": "Washington Capitals"
+    "ana": "Anaheim Ducks", "bos": "Boston Bruins", "buf": "Buffalo Sabres",
+    "car": "Carolina Hurricanes", "cbj": "Columbus Blue Jackets", "cgy": "Calgary Flames",
+    "chi": "Chicago Blackhawks", "col": "Colorado Avalanche", "dal": "Dallas Stars",
+    "det": "Detroit Red Wings", "edm": "Edmonton Oilers", "fla": "Florida Panthers",
+    "la": "Los Angeles Kings", "lak": "Los Angeles Kings", "min": "Minnesota Wild",
+    "mtl": "Montreal Canadiens", "njd": "New Jersey Devils", "nj": "New Jersey Devils",
+    "nsh": "Nashville Predators", "nyi": "New York Islanders", "nyr": "New York Rangers",
+    "ott": "Ottawa Senators", "phi": "Philadelphia Flyers", "pit": "Pittsburgh Penguins",
+    "sea": "Seattle Kraken", "sjs": "San Jose Sharks", "sj": "San Jose Sharks",
+    "stl": "St. Louis Blues", "tbl": "Tampa Bay Lightning", "tb": "Tampa Bay Lightning",
+    "tor": "Toronto Maple Leafs", "uta": "Utah Hockey Club", "van": "Vancouver Canucks",
+    "vgk": "Vegas Golden Knights", "wpg": "Winnipeg Jets", "wsh": "Washington Capitals"
 }
 
 LEAGUE_CATEGORIES = [
-    "All Hockey",
-    "NHL",
-    "NCAA Men's D1 Hockey",
-    "AHL",
-    "ECHL",
-    "SPHL",
-    "QMJHL",
-    "OHL / WHL Juniors",
-    "Swedish Hockey League (SHL)",
-    "Finnish Liiga",
-    "Swiss National League (NL)"
+    "All Hockey", "NHL", "NCAA Men's D1 Hockey", "AHL", "ECHL", "SPHL",
+    "QMJHL", "OHL / WHL Juniors", "Swedish Hockey League (SHL)",
+    "Finnish Liiga", "Swiss National League (NL)"
 ]
 
 LEAGUE_PRIORITY = {
-    "NHL": 1,
-    "NCAA Men's D1": 2,
-    "AHL": 3,
-    "ECHL": 4,
-    "SPHL": 5,
-    "QMJHL": 6,
-    "OHL / WHL Juniors": 7,
-    "Swedish SHL": 8,
-    "Finnish Liiga": 9,
-    "Swiss NL": 10,
-    "Other Hockey": 99
+    "NHL": 1, "NCAA Men's D1": 2, "AHL": 3, "ECHL": 4, "SPHL": 5,
+    "QMJHL": 6, "OHL / WHL Juniors": 7, "Swedish SHL": 8, "Finnish Liiga": 9,
+    "Swiss NL": 10, "Other Hockey": 99
 }
 
 STYLESHEET = """
-QMainWindow {
-    background-color: #05070a;
-}
-
-QWidget#CentralWidget {
-    background-color: #05070a;
-}
-
-QScrollArea {
-    border: none;
-    background: transparent;
-}
+QMainWindow { background-color: #05070a; }
+QWidget#CentralWidget { background-color: #05070a; }
+QScrollArea { border: none; background: transparent; }
 QScrollBar:vertical {
-    border: none;
-    background: #090c12;
-    width: 6px;
-    margin: 0px;
-    border-radius: 3px;
+    border: none; background: #090c12; width: 6px; margin: 0px; border-radius: 3px;
 }
-QScrollBar::handle:vertical {
-    background: #192130;
-    min-height: 25px;
-    border-radius: 3px;
-}
-QScrollBar::handle:vertical:hover {
-    background: #10B981;
-}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0px;
-}
+QScrollBar::handle:vertical { background: #192130; min-height: 25px; border-radius: 3px; }
+QScrollBar::handle:vertical:hover { background: #10B981; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
 
 QComboBox {
-    background-color: #0d121c;
-    color: #F1F5F9;
-    padding: 8px 16px;
-    border: 1px solid #1a2336;
-    border-radius: 6px;
-    font-weight: 700;
-    font-size: 13px;
+    background-color: #0d121c; color: #F1F5F9; padding: 8px 16px;
+    border: 1px solid #1a2336; border-radius: 6px; font-weight: 700; font-size: 13px;
 }
-QComboBox:hover {
-    border: 1px solid #10B981;
-}
+QComboBox:hover { border: 1px solid #10B981; }
 QComboBox QAbstractItemView {
-    background-color: #0d121c;
-    color: #F1F5F9;
-    selection-background-color: #10B981;
-    selection-color: #05070a;
-    border: 1px solid #1a2336;
-    padding: 4px;
-    outline: 0px;
+    background-color: #0d121c; color: #F1F5F9; selection-background-color: #10B981;
+    selection-color: #05070a; border: 1px solid #1a2336; padding: 4px; outline: 0px;
 }
 
 QPushButton#NavBtn {
-    background-color: #0f1624;
-    color: #E2E8F0;
-    font-weight: 700;
-    font-size: 11px;
-    padding: 6px 14px;
-    border-radius: 6px;
-    border: 1px solid #1d2b42;
+    background-color: #0f1624; color: #E2E8F0; font-weight: 700; font-size: 11px;
+    padding: 6px 14px; border-radius: 6px; border: 1px solid #1d2b42;
 }
-QPushButton#NavBtn:hover {
-    background-color: #172338;
-    border-color: #10B981;
-    color: #10B981;
-}
+QPushButton#NavBtn:hover { background-color: #172338; border-color: #10B981; color: #10B981; }
 
 QPushButton#TodayBtn {
+    background-color: #10B981; color: #05070a; font-weight: 700; font-size: 11px;
+    padding: 6px 14px; border-radius: 6px; border: none;
+}
+QPushButton#TodayBtn:hover { background-color: #059669; color: #FFFFFF; }
+
+QMenu {
+    background-color: #0d121c;
+    color: #F1F5F9;
+    border: 1px solid #232d42;
+    border-radius: 6px;
+    padding: 4px;
+}
+QMenu::item {
+    padding: 8px 20px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+}
+QMenu::item:selected {
     background-color: #10B981;
     color: #05070a;
-    font-weight: 700;
-    font-size: 11px;
-    padding: 6px 14px;
-    border-radius: 6px;
-    border: none;
-}
-QPushButton#TodayBtn:hover {
-    background-color: #059669;
-    color: #FFFFFF;
 }
 """
+
+# ---------------------------------------------------------
+# Timezone Selection Dialog
+# ---------------------------------------------------------
+class TimezoneSelectionDialog(QDialog):
+    def __init__(self, parent=None, initial_tz="Local System Time"):
+        super().__init__(parent)
+        self.setWindowTitle("Select Timezone")
+        self.setFixedSize(360, 160)
+        self.setStyleSheet("""
+            QDialog { background-color: #0d121c; color: #fff; }
+            QLabel { color: #f8fafc; font-size: 13px; font-weight: bold; }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        lbl = QLabel("Choose display timezone for game times:")
+        layout.addWidget(lbl)
+
+        self.tz_combo = QComboBox()
+        self.tz_combo.addItems(list(TIMEZONE_OFFSETS.keys()))
+        if initial_tz in TIMEZONE_OFFSETS:
+            self.tz_combo.setCurrentText(initial_tz)
+        layout.addWidget(self.tz_combo)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.setStyleSheet("""
+            QPushButton {
+                background-color: #10B981; color: #05070a; font-weight: bold;
+                padding: 6px 14px; border-radius: 4px;
+            }
+        """)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def get_selected_timezone(self):
+        return self.tz_combo.currentText()
+
+
+# ---------------------------------------------------------
+# Stream Handshake & Launch Helpers
+# ---------------------------------------------------------
+def resolve_and_launch_vlc(embed_url, window_title="HLH Stream"):
+    """Extracts the session token from Matchora and opens the master .m3u8 in VLC."""
+    if not embed_url:
+        return
+
+    if "matchora.to/embed/match/" in embed_url:
+        try:
+            session = requests.Session()
+            session.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://matchora.to/",
+            })
+            resp = session.get(embed_url, timeout=5)
+            if resp.status_code == 200:
+                html = resp.text
+                ch_match = re.search(r'var\s+CH\s*=\s*"([^"]+)"', html)
+                fx_match = re.search(r'var\s+FX\s*=\s*"([^"]+)"', html)
+                pp_match = re.search(r'var\s+PP\s*=\s*"([^"]+)"', html)
+
+                if ch_match and pp_match:
+                    ch = ch_match.group(1)
+                    fx = fx_match.group(1) if fx_match else ""
+                    pp = pp_match.group(1)
+
+                    api_url = f"https://matchora.to/api/play/{ch}?fx={fx}&pp={pp}"
+                    api_resp = session.get(api_url, timeout=5)
+                    if api_resp.status_code == 200:
+                        stream_m3u8 = api_resp.json().get("url")
+
+                        if stream_m3u8 and ".m3u8" in stream_m3u8:
+                            vlc = shutil.which("vlc")
+                            if not vlc and sys.platform == "win32":
+                                for default_path in [
+                                    r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+                                    r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe"
+                                ]:
+                                    if os.path.exists(default_path):
+                                        vlc = default_path
+                                        break
+
+                            if vlc:
+                                cmd = [
+                                    vlc,
+                                    stream_m3u8,
+                                    ":http-referrer=https://matchora.to/",
+                                    f"--meta-title={window_title}",
+                                    "--qt-minimal-view"
+                                ]
+                                creation_flag = 0x08000000 if sys.platform == "win32" else 0
+                                subprocess.Popen(cmd, creationflags=creation_flag)
+                                return
+        except Exception:
+            pass
+
+    # Fallback to browser
+    open_url(embed_url)
 
 
 def open_url(url):
     """Reliably opens links in default system browser."""
     if not url:
         return
-    print(f"[LAUNCHING IN BROWSER]: {url}")
     if sys.platform == "win32":
         os.startfile(url)
     else:
@@ -188,27 +240,20 @@ def open_url(url):
 
 
 def parse_nhl_team(team_dict):
-    """Safely extracts full NHL franchise names from official API response."""
     if not isinstance(team_dict, dict):
         return "NHL Team", ""
-
     abbrev = str(team_dict.get("abbrev", "")).strip().lower()
-
     if abbrev in NHL_FRANCHISES:
         return NHL_FRANCHISES[abbrev], abbrev
-
     place = team_dict.get("placeName")
     nick = team_dict.get("commonName")
-
     if isinstance(place, dict):
         place = place.get("default", "")
     if isinstance(nick, dict):
         nick = nick.get("default", "")
-
     full = f"{str(place or '')} {str(nick or '')}".strip()
     if full and full != "None None":
         return full, abbrev
-
     return abbrev.upper() if abbrev else "NHL Team", abbrev
 
 
@@ -216,13 +261,23 @@ class MultiLeagueScheduleFetcher(QThread):
     games_loaded = pyqtSignal(list)
     fetch_error = pyqtSignal(str)
 
-    def __init__(self, filter_key, target_date):
+    def __init__(self, filter_key, target_date, tz_name):
         super().__init__()
         self.filter_key = filter_key
         self.target_date = target_date
+        self.tz_name = tz_name
+
+    def format_time(self, utc_dt):
+        """Converts UTC datetime into chosen timezone formatted string."""
+        offset_hours = TIMEZONE_OFFSETS.get(self.tz_name)
+        if offset_hours is None:
+            # Local System Time
+            return utc_dt.astimezone().strftime("%I:%M %p")
+        else:
+            tz = timezone(timedelta(hours=offset_hours))
+            return utc_dt.astimezone(tz).strftime("%I:%M %p")
 
     def get_matchora_stream_map(self, headers):
-        """Builds a lookup table of active Matchora streams for team matchups."""
         matchora_streams = []
         try:
             url = f"{API_BASE}/schedule?watchable=1"
@@ -233,21 +288,17 @@ class MultiLeagueScheduleFetcher(QThread):
                     away = str(ev.get("away") or "").lower()
                     embed = ev.get("embed_url") or f"https://matchora.to/embed/match/{ev.get('id')}"
                     matchora_streams.append({"home": home, "away": away, "embed": embed})
-        except Exception as e:
-            print(f"[Matchora Stream Map Error]: {e}")
+        except Exception:
+            pass
         return matchora_streams
 
     def find_matchora_url(self, home_name, away_name, stream_map):
-        """Scans active Matchora events for team match; falls back to OnHockey."""
         h_clean = home_name.lower()
         a_clean = away_name.lower()
-        
         for item in stream_map:
-            # Check if keywords overlap
             if (any(word in item["home"] for word in h_clean.split() if len(word) > 3) or
                 any(word in item["away"] for word in a_clean.split() if len(word) > 3)):
                 return item["embed"]
-        
         return "http://onhockey.tv/"
 
     def fetch_nhl_official(self, headers, stream_map):
@@ -263,7 +314,6 @@ class MultiLeagueScheduleFetcher(QThread):
             for g in data.get("games", []):
                 away_raw = g.get("awayTeam", {})
                 home_raw = g.get("homeTeam", {})
-
                 away_name, away_code = parse_nhl_team(away_raw)
                 home_name, home_code = parse_nhl_team(home_raw)
 
@@ -283,8 +333,8 @@ class MultiLeagueScheduleFetcher(QThread):
                     status = "Scheduled"
                     if utc_start:
                         try:
-                            dt = datetime.fromisoformat(utc_start.replace("Z", "+00:00")).astimezone()
-                            status = dt.strftime("%I:%M %p")
+                            dt = datetime.fromisoformat(utc_start.replace("Z", "+00:00"))
+                            status = self.format_time(dt)
                         except Exception:
                             pass
 
@@ -294,8 +344,6 @@ class MultiLeagueScheduleFetcher(QThread):
                 date_query = self.target_date.strftime("%B %d %Y")
                 recap_query = urllib.parse.quote(f"{away_name} vs {home_name} condensed game recap {date_query}")
                 recap_url = f"https://www.youtube.com/results?search_query={recap_query}" if is_final else None
-
-                # Find direct Matchora stream or fallback to OnHockey
                 watch_url = self.find_matchora_url(home_name, away_name, stream_map)
 
                 games.append({
@@ -316,8 +364,8 @@ class MultiLeagueScheduleFetcher(QThread):
                     "kickoff_ts": 0,
                     "is_ncaa": False
                 })
-        except Exception as e:
-            print(f"[NHL Official API Error]: {e}")
+        except Exception:
+            pass
         return games
 
     def fetch_espn_ncaa(self, headers):
@@ -367,14 +415,14 @@ class MultiLeagueScheduleFetcher(QThread):
                     "status": short_detail,
                     "is_live": is_live,
                     "is_final": is_final,
-                    "embed_url": "http://onhockey.tv/",  # NCAA Watch opens OnHockey
+                    "embed_url": "http://onhockey.tv/",
                     "recap_url": recap_url,
                     "channels": 0,
                     "kickoff_ts": 0,
                     "is_ncaa": True
                 })
-        except Exception as e:
-            print(f"[NCAA Fetch Error]: {e}")
+        except Exception:
+            pass
         return games
 
     def fetch_matchora(self, headers):
@@ -421,13 +469,13 @@ class MultiLeagueScheduleFetcher(QThread):
                 time_str = "Scheduled"
                 if kickoff:
                     try:
-                        time_str = datetime.fromtimestamp(float(kickoff)).strftime("%I:%M %p")
+                        utc_dt = datetime.fromtimestamp(float(kickoff), tz=timezone.utc)
+                        time_str = self.format_time(utc_dt)
                     except Exception:
                         pass
 
                 minute_val = ev.get("minute")
                 status_label = f"{minute_val}m" if (is_live and minute_val) else ("LIVE" if is_live else time_str)
-
                 score_str = ev.get("score") or "0-0"
                 scores = score_str.split("-") if "-" in score_str else ["0", "0"]
 
@@ -466,16 +514,14 @@ class MultiLeagueScheduleFetcher(QThread):
                     "kickoff_ts": float(kickoff) if kickoff else 0,
                     "is_ncaa": False
                 })
-        except Exception as e:
-            print(f"[Matchora Fetch Error]: {e}")
+        except Exception:
+            pass
         return games
 
     def run(self):
         try:
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             combined_games = []
-
-            # Pre-fetch active Matchora streams for direct embed matching
             stream_map = self.get_matchora_stream_map(headers)
 
             if self.filter_key == "All Hockey":
@@ -495,7 +541,6 @@ class MultiLeagueScheduleFetcher(QThread):
                     not g["is_live"]
                 )
             )
-
             self.games_loaded.emit(combined_games)
         except Exception as e:
             self.fetch_error.emit(str(e))
@@ -566,7 +611,6 @@ class MomentumWaveWidget(QWidget):
         w = self.width()
         h = self.height()
         mid_y = h / 2.0
-
         left_m = 50.0
         right_m = 20.0
         chart_w = w - left_m - right_m
@@ -624,7 +668,6 @@ class MomentumWaveWidget(QWidget):
 
         game_progress = 0.65 if is_live else 1.0
         active_w = chart_w * game_progress
-
         points = []
         step_x = 14.0
         curr_x = left_m
@@ -637,11 +680,9 @@ class MomentumWaveWidget(QWidget):
             wave1 = math.sin(t * 0.5 + seed) * 22.0
             wave2 = math.cos(t * 0.9 + seed) * 12.0
             wave3 = math.sin(t * 1.8) * 8.0
-            
             y_offset = (wave1 + wave2 + wave3) + bias
             y_clamped = max(-42.0, min(42.0, y_offset))
             points.append(QPointF(curr_x, mid_y - y_clamped))
-
             t += 0.8
             curr_x += step_x
 
@@ -650,7 +691,6 @@ class MomentumWaveWidget(QWidget):
 
         curve_path = QPainterPath()
         curve_path.moveTo(points[0])
-
         for i in range(len(points) - 1):
             p0 = points[i]
             p1 = points[i + 1]
@@ -679,20 +719,10 @@ class MomentumWaveWidget(QWidget):
             painter.drawLine(int(points[-1].x()), int(mid_y), int(w - right_m), int(mid_y))
 
         painter.setFont(QFont("Segoe UI Emoji", 10))
-        if a_s > 0:
-            painter.drawText(int(left_m + (active_w * 0.32) - 7), int(mid_y - 44), "🚨")
-        if a_s > 1:
-            painter.drawText(int(left_m + (active_w * 0.54) - 7), int(mid_y - 44), "🚨")
-
-        if h_s > 0:
-            painter.drawText(int(left_m + (active_w * 0.16) - 7), int(mid_y + 54), "🚨")
-        if h_s > 1:
-            painter.drawText(int(left_m + (active_w * 0.78) - 7), int(mid_y + 54), "🚨")
-
-        painter.drawText(int(left_m + (active_w * 0.22)), int(mid_y - 44), "⚠️")
-        painter.drawText(int(left_m + (active_w * 0.44)), int(mid_y - 44), "⚠️")
-        painter.drawText(int(left_m + (active_w * 0.48)), int(mid_y - 44), "⚠️")
-        painter.drawText(int(left_m + (active_w * 0.52)), int(mid_y + 54), "⚠️")
+        if a_s > 0: painter.drawText(int(left_m + (active_w * 0.32) - 7), int(mid_y - 44), "🚨")
+        if a_s > 1: painter.drawText(int(left_m + (active_w * 0.54) - 7), int(mid_y - 44), "🚨")
+        if h_s > 0: painter.drawText(int(left_m + (active_w * 0.16) - 7), int(mid_y + 54), "🚨")
+        if h_s > 1: painter.drawText(int(left_m + (active_w * 0.78) - 7), int(mid_y + 54), "🚨")
 
 
 class GameCard(QFrame):
@@ -732,25 +762,18 @@ class GameCard(QFrame):
         
         if game["is_live"]:
             lbl_status.setStyleSheet("""
-                background-color: #064e3b; 
-                color: #34d399; 
-                padding: 4px 10px; 
-                border-radius: 10px;
-                border: 1px solid #059669;
+                background-color: #064e3b; color: #34d399; 
+                padding: 4px 10px; border-radius: 10px; border: 1px solid #059669;
             """)
         elif game.get("is_final"):
             lbl_status.setStyleSheet("""
-                background-color: #27272a; 
-                color: #A1A1AA; 
-                padding: 4px 10px; 
-                border-radius: 10px;
+                background-color: #27272a; color: #A1A1AA; 
+                padding: 4px 10px; border-radius: 10px;
             """)
         else:
             lbl_status.setStyleSheet("""
-                background-color: #161e2b; 
-                color: #94a3b8; 
-                padding: 4px 10px; 
-                border-radius: 10px;
+                background-color: #161e2b; color: #94a3b8; 
+                padding: 4px 10px; border-radius: 10px;
             """)
         status_box.addWidget(lbl_status)
         main_row.addLayout(status_box)
@@ -793,71 +816,49 @@ class GameCard(QFrame):
         teams_layout.addStretch()
         main_row.addLayout(teams_layout, stretch=1)
 
-        # Context-Aware Buttons
+        # Action Buttons
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
 
         if not self.is_past_date and not game.get("is_final"):
-            # 1. Main Watch Button (Matchora lookup or OnHockey fallback)
-            btn_watch = QPushButton("Watch")
-            btn_watch.setStyleSheet("""
+            # Multi-Option Watch Dropdown Button
+            self.btn_watch = QPushButton("Watch ▾")
+            self.btn_watch.setStyleSheet("""
                 QPushButton {
-                    background-color: #10B981;
-                    color: #05070a;
-                    font-weight: 800;
-                    font-size: 11px;
-                    padding: 7px 18px;
-                    border-radius: 6px;
-                    border: none;
+                    background-color: #10B981; color: #05070a;
+                    font-weight: 800; font-size: 11px; padding: 7px 18px;
+                    border-radius: 6px; border: none;
                 }
-                QPushButton:hover {
-                    background-color: #059669;
-                    color: #FFFFFF;
-                }
+                QPushButton:hover { background-color: #059669; color: #FFFFFF; }
             """)
-            btn_watch.clicked.connect(lambda checked, u=game["embed_url"]: open_url(u))
-            btn_layout.addWidget(btn_watch)
 
-            # 2. Secondary OnHockey button (Hidden on NCAA cards)
-            if not game.get("is_ncaa"):
-                btn_onhockey = QPushButton("OnHockey")
-                btn_onhockey.setStyleSheet("""
-                    QPushButton {
-                        background-color: #121926;
-                        color: #CBD5E1;
-                        font-weight: 600;
-                        font-size: 11px;
-                        padding: 7px 14px;
-                        border-radius: 6px;
-                        border: 1px solid #1e283b;
-                    }
-                    QPushButton:hover {
-                        background-color: #1a2538;
-                        color: #10B981;
-                        border-color: #10B981;
-                    }
-                """)
-                btn_onhockey.clicked.connect(lambda checked: open_url("http://onhockey.tv/"))
-                btn_layout.addWidget(btn_onhockey)
+            # Setup Popup Menu for the button
+            stream_menu = QMenu(self)
+            
+            act_vlc = QAction("▶ VLC Player (Direct HLS)", self)
+            match_title = f"{game['away']} vs {game['home']}"
+            act_vlc.triggered.connect(lambda checked, u=game["embed_url"], t=match_title: resolve_and_launch_vlc(u, t))
+            stream_menu.addAction(act_vlc)
 
+            act_embed = QAction("🌐 Matchora Web Embed", self)
+            act_embed.triggered.connect(lambda checked, u=game["embed_url"]: open_url(u))
+            stream_menu.addAction(act_embed)
+
+            act_onhockey = QAction("🏒 OnHockey Match Stream", self)
+            act_onhockey.triggered.connect(lambda checked: open_url("http://onhockey.tv/"))
+            stream_menu.addAction(act_onhockey)
+
+            self.btn_watch.setMenu(stream_menu)
+            btn_layout.addWidget(self.btn_watch)
         else:
-            # Past / Completed Games: Display Recap button
             if game.get("recap_url"):
                 btn_recap = QPushButton("▶ Recap")
                 btn_recap.setStyleSheet("""
                     QPushButton {
-                        background-color: #182234;
-                        color: #38BDF8;
-                        font-weight: 700;
-                        font-size: 11px;
-                        padding: 6px 14px;
-                        border-radius: 6px;
-                        border: 1px solid #0284C7;
+                        background-color: #182234; color: #38BDF8; font-weight: 700;
+                        font-size: 11px; padding: 6px 14px; border-radius: 6px; border: 1px solid #0284C7;
                     }
-                    QPushButton:hover {
-                        background-color: #0284C7;
-                        color: #FFFFFF;
-                    }
+                    QPushButton:hover { background-color: #0284C7; color: #FFFFFF; }
                 """)
                 btn_recap.clicked.connect(lambda checked, u=game["recap_url"]: open_url(u))
                 btn_layout.addWidget(btn_recap)
@@ -873,11 +874,7 @@ class GameCard(QFrame):
 
         self.momentum_drawer = QFrame()
         self.momentum_drawer.setStyleSheet("""
-            QFrame {
-                background-color: #06080d;
-                border: 1px solid #131924;
-                border-radius: 6px;
-            }
+            QFrame { background-color: #06080d; border: 1px solid #131924; border-radius: 6px; }
         """)
         drawer_layout = QVBoxLayout(self.momentum_drawer)
         drawer_layout.setContentsMargins(12, 10, 12, 8)
@@ -908,19 +905,17 @@ class LeagueHeaderBanner(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 16, 4, 6)
         layout.setSpacing(10)
-
         lbl = QLabel(title.upper())
         lbl.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         lbl.setStyleSheet("color: #10B981; letter-spacing: 1px;")
         layout.addWidget(lbl)
-
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setStyleSheet("border: none; background-color: #161e2b; height: 1px;")
         layout.addWidget(line, stretch=1)
 
 
-class HockeyHubApp(QMainWindow):
+class HockeyHubBeta(QMainWindow):
     def __init__(self):
         super().__init__()
         global NETWORK_MANAGER
@@ -928,9 +923,14 @@ class HockeyHubApp(QMainWindow):
         self.thread = None
         self.active_date = datetime.now().date()
 
-        self.setWindowTitle("Hockey Live Hub")
+        # Persistent user settings (Registry / Config File)
+        self.settings = QSettings("HLH", "HockeyLiveHubBeta")
+        self.init_timezone()
+
+        self.setWindowTitle("Hockey Live Hub (BETA)")
         self.resize(980, 720)
         self.setStyleSheet(STYLESHEET)
+        self.init_icon()
 
         central = QWidget()
         central.setObjectName("CentralWidget")
@@ -955,6 +955,13 @@ class HockeyHubApp(QMainWindow):
         btn_refresh.setObjectName("NavBtn")
         btn_refresh.clicked.connect(self.load_schedule)
         header_bar.addWidget(btn_refresh)
+
+        # Timezone settings button
+        self.btn_tz = QPushButton(f"⚙ {self.get_tz_short_label()}")
+        self.btn_tz.setObjectName("NavBtn")
+        self.btn_tz.setToolTip("Click to change timezone")
+        self.btn_tz.clicked.connect(self.prompt_change_timezone)
+        header_bar.addWidget(self.btn_tz)
 
         header_bar.addSpacing(16)
 
@@ -995,10 +1002,45 @@ class HockeyHubApp(QMainWindow):
         self.update_date_label()
         self.load_schedule()
 
+    def init_timezone(self):
+        saved_tz = self.settings.value("timezone", None)
+        if not saved_tz:
+            # First launch: Prompt the user
+            dialog = TimezoneSelectionDialog(self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                saved_tz = dialog.get_selected_timezone()
+            else:
+                saved_tz = "Local System Time"
+            self.settings.setValue("timezone", saved_tz)
+        self.current_tz = saved_tz
+
+    def get_tz_short_label(self):
+        if "Eastern" in self.current_tz: return "ET"
+        if "Central" in self.current_tz: return "CT"
+        if "Mountain" in self.current_tz: return "MT"
+        if "Pacific" in self.current_tz: return "PT"
+        if "Alaska" in self.current_tz: return "AKT"
+        if "Hawaii" in self.current_tz: return "HST"
+        if "UTC" in self.current_tz: return "UTC"
+        return "LOC"
+
+    def prompt_change_timezone(self):
+        dialog = TimezoneSelectionDialog(self, initial_tz=self.current_tz)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.current_tz = dialog.get_selected_timezone()
+            self.settings.setValue("timezone", self.current_tz)
+            self.btn_tz.setText(f"⚙ {self.get_tz_short_label()}")
+            self.load_schedule()
+
+    def init_icon(self):
+        base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        icon_path = os.path.join(base_dir, "app_icon.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+
     def update_date_label(self):
         today = datetime.now().date()
         self.lbl_date_status.setText(self.active_date.strftime("%A, %b %d"))
-        
         if self.active_date == today:
             self.btn_today.setObjectName("TodayBtn")
             self.btn_today.setStyleSheet("background-color: #10B981; color: #05070a; font-weight: 700;")
@@ -1035,9 +1077,8 @@ class HockeyHubApp(QMainWindow):
             self.thread.wait()
 
         self.clear_cards()
-
         selected = self.league_combo.currentText()
-        self.thread = MultiLeagueScheduleFetcher(selected, self.active_date)
+        self.thread = MultiLeagueScheduleFetcher(selected, self.active_date, self.current_tz)
         self.thread.games_loaded.connect(self.populate_games)
         self.thread.fetch_error.connect(self.handle_error)
         self.thread.start()
@@ -1063,11 +1104,7 @@ class HockeyHubApp(QMainWindow):
             for g in games:
                 grouped.setdefault(g["league"], []).append(g)
 
-            sorted_leagues = sorted(
-                grouped.keys(), 
-                key=lambda l: LEAGUE_PRIORITY.get(l, 50)
-            )
-
+            sorted_leagues = sorted(grouped.keys(), key=lambda l: LEAGUE_PRIORITY.get(l, 50))
             for league_name in sorted_leagues:
                 league_games = grouped[league_name]
                 self.card_layout.addWidget(LeagueHeaderBanner(f"{league_name} ({len(league_games)})"))
@@ -1082,6 +1119,6 @@ class HockeyHubApp(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    win = HockeyHubApp()
+    win = HockeyHubBeta()
     win.show()
     sys.exit(app.exec())

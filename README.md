@@ -1,50 +1,63 @@
 <div align="center">
 
-![HLH Banner](banner.png)
+# 🏒 Hockey Live Hub (HLH)
 
-# Hockey Live Hub (HLH) 🏒
+**A lightweight, ad-free desktop scoreboard and live stream launcher for hockey fans.**
 
-A lightweight, minimalist desktop scoreboard and stream router for hockey fans. Track live games across the NHL, NCAA Men's Division 1, and global professional leagues with zero visual clutter.
+[![Download Latest Release](https://img.shields.io/github/v/release/pcjake22/hlh?color=10B981&label=Download%20.exe&logo=windows&style=for-the-badge)](https://github.com/pcjake22/hlh/releases/latest)
 
-<p align="center">
-  <a href="https://github.com/pcjake22/hlh/releases">
-    <img src="https://img.shields.io/github/v/release/pcjake22/hlh?style=for-the-badge&logo=github&color=10B981&labelColor=0d1117" alt="Latest Release">
-  </a>
-  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white&labelColor=0d1117" alt="Python Version">
-  <img src="https://img.shields.io/badge/PyQt-6-41CD52?style=for-the-badge&logo=qt&logoColor=white&labelColor=0d1117" alt="PyQt6">
-  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-171d2b?style=for-the-badge&logo=windows&logoColor=white" alt="Platform">
-  <a href="https://github.com/pcjake22/hlh/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge&labelColor=0d1117" alt="License">
-  </a>
-  <a href="https://buymeacoffee.com/Sadpipo">
-    <img src="https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee">
-  </a>
-</p>
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
+[![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41CD52?style=flat&logo=qt&logoColor=white)](https://pypi.org/project/PyQt6/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Buy Me A Coffee](https://img.shields.io/badge/Support-Buy%20Me%20A%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/Sadpipo)
 
 </div>
 
 ---
 
-## ⚡ Key Features
+## 📥 Quick Download (Windows Standalone)
 
-- **Official NHL Data Feed:** Real-time scores, clock telemetry, and game states directly via the official NHL Web API.
-- **NCAA Men's Division 1 & Global Leagues:** Live score coverage spanning college hockey, AHL, ECHL, SPHL, QMJHL, OHL/WHL Juniors, SHL, Liiga, and Swiss NL.
-- **Direct Stream Matching:** The **Watch** button resolves direct embed links via Matchora when available and falls back smoothly.
-- **Dedicated Routing:** Pro and minor league cards include a dedicated **OnHockey** button for quick alternative access; NCAA cards are streamlined to a single watch button.
-- **10-Minute Condensed Recaps:** Finished games automatically display a **▶ Recap** button linking directly to official game highlights.
-- **Interactive Momentum Wave:** Expandable cards reveal period-by-period scoring flow and momentum charts.
-- **Native Desktop Integration:** Configured with a dedicated Windows `AppUserModelID` and custom taskbar icon.
+Don't want to install Python or build from source? Grab the ready-to-run `.exe` directly:
+
+👉 **[Download the Latest HockeyLiveHub.exe](https://github.com/pcjake22/hlh/releases/latest)**
+
+1. Download `HockeyLiveHub.exe` from the latest release.
+2. *(Recommended)* Ensure you have [VLC Media Player](https://www.videolan.org/vlc/) installed for ad-free direct stream playback.
+3. Double-click and enjoy — no installer or dependencies required!
 
 ---
 
-## 🚀 Getting Started
+## ⚡ Features
+
+- **Direct VLC / MPV Streaming:** Automated session resolver extracts live HLS (`.m3u8`) manifests directly from web endpoints, allowing you to watch ad-free in native media players.
+- **Multi-Stream Selector:** Easily choose between direct VLC playback, clean web embeds, or aggregator search queries right from the game card.
+- **Automatic Timezone Localization:** Prompts for your timezone on first launch and converts all UTC game schedules to your local time.
+- **Live Multi-League Telemetry:** Direct integration with official NHL and NCAA feeds for instant scores, period tracking, and game clocks.
+- **Momentum Drawer:** Interactive expandable visualizers showcasing real-time game flow and pressure metrics.
+- **Condensed 10-Minute Recaps:** Instant routing to official post-game video recaps once games go final.
+- **Dark Matte Interface:** Custom PyQt6 UI designed with minimal RAM overhead and zero background ad bloat.
+
+---
+
+## 🖥️ Supported Leagues
+
+- **NHL** (National Hockey League)
+- **NCAA Men's D1** Hockey
+- **AHL** (American Hockey League)
+- **ECHL** / **SPHL**
+- **CHL Juniors** (OHL / WHL / QMJHL)
+- **European Leagues** (Swedish SHL, Finnish Liiga, Swiss NL)
+
+---
+
+## 🛠️ Running from Source (Developers)
 
 ### Prerequisites
 
-- Python 3.10 or newer
-- `pip`
+- **Python 3.10+**
+- **VLC Media Player**
 
-### Installation
+### Setup
 
 1. **Clone the repository:**
    ```bash

@@ -10,7 +10,7 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 from PyQt6 import sip
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl, QPointF, QSettings
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl, QPointF, QSettings, QTimer
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLabel, QPushButton, QScrollArea, QFrame, QMessageBox, QComboBox,
@@ -26,7 +26,7 @@ from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkRepl
 if sys.platform == "win32":
     import ctypes
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("pcjake22.hlh.desktop.beta")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("pcjake22.hlh.desktop.main")
     except Exception:
         pass
 
@@ -61,6 +61,24 @@ NHL_FRANCHISES = {
     "stl": "St. Louis Blues", "tbl": "Tampa Bay Lightning", "tb": "Tampa Bay Lightning",
     "tor": "Toronto Maple Leafs", "uta": "Utah Hockey Club", "van": "Vancouver Canucks",
     "vgk": "Vegas Golden Knights", "wpg": "Winnipeg Jets", "wsh": "Washington Capitals"
+}
+
+ESPN_LOGO_OVERRIDES = {
+    "uta": "utah",
+    "mtl": "mon",
+    "cbj": "clb",
+    "njd": "nj",
+    "nj": "nj",
+    "tbl": "tb",
+    "tb": "tb",
+    "la": "la",
+    "lak": "la",
+    "sjs": "sj",
+    "sj": "sj",
+    "wsh": "was",
+    "cgy": "cal",
+    "vgk": "vgs",
+    "wpg": "wpg"
 }
 
 LEAGUE_CATEGORIES = [
@@ -127,9 +145,11 @@ QMenu::item:selected {
 }
 """
 
-# ---------------------------------------------------------
-# Timezone Selection Dialog
-# ---------------------------------------------------------
+
+def clean_team_name(name):
+    return re.sub(r'[^a-zA-Z0-9]', '', str(name or "")).lower()
+
+
 class TimezoneSelectionDialog(QDialog):
     def __init__(self, parent=None, initial_tz="Local System Time"):
         super().__init__(parent)
@@ -168,11 +188,8 @@ class TimezoneSelectionDialog(QDialog):
         return self.tz_combo.currentText()
 
 
-# ---------------------------------------------------------
-# Stream Handshake & Launch Helpers
-# ---------------------------------------------------------
 def resolve_and_launch_vlc(embed_url, window_title="HLH Stream"):
-    """Extracts the session token from Matchora and opens the master .m3u8 in VLC."""
+    """Extracts session token from Matchora and opens the master .m3u8 in VLC."""
     if not embed_url:
         return
 
@@ -210,6 +227,15 @@ def resolve_and_launch_vlc(embed_url, window_title="HLH Stream"):
                                     if os.path.exists(default_path):
                                         vlc = default_path
                                         break
+                            elif not vlc and sys.platform == "darwin":
+                                mac_vlc = "/Applications/VLC.app/Contents/MacOS/VLC"
+                                if os.path.exists(mac_vlc):
+                                    vlc = mac_vlc
+                            elif not vlc and sys.platform.startswith("linux"):
+                                for default_path in ["/usr/bin/vlc", "/usr/local/bin/vlc"]:
+                                    if os.path.exists(default_path):
+                                        vlc = default_path
+                                        break
 
                             if vlc:
                                 cmd = [
@@ -225,7 +251,6 @@ def resolve_and_launch_vlc(embed_url, window_title="HLH Stream"):
         except Exception:
             pass
 
-    # Fallback to browser
     open_url(embed_url)
 
 
@@ -233,10 +258,7 @@ def open_url(url):
     """Reliably opens links in default system browser."""
     if not url:
         return
-    if sys.platform == "win32":
-        os.startfile(url)
-    else:
-        subprocess.Popen(["xdg-open", url])
+    webbrowser.open(url)
 
 
 def parse_nhl_team(team_dict):
@@ -267,11 +289,20 @@ class MultiLeagueScheduleFetcher(QThread):
         self.target_date = target_date
         self.tz_name = tz_name
 
-    def format_time(self, utc_dt):
-        """Converts UTC datetime into chosen timezone formatted string."""
+    def get_event_local_date(self, kickoff_ts):
+        """Converts UTC kickoff timestamp to the selected timezone calendar date."""
+        if not kickoff_ts:
+            return self.target_date
         offset_hours = TIMEZONE_OFFSETS.get(self.tz_name)
         if offset_hours is None:
-            # Local System Time
+            return datetime.fromtimestamp(kickoff_ts).date()
+        else:
+            tz = timezone(timedelta(hours=offset_hours))
+            return datetime.fromtimestamp(kickoff_ts, tz=tz).date()
+
+    def format_time(self, utc_dt):
+        offset_hours = TIMEZONE_OFFSETS.get(self.tz_name)
+        if offset_hours is None:
             return utc_dt.astimezone().strftime("%I:%M %p")
         else:
             tz = timezone(timedelta(hours=offset_hours))
@@ -321,6 +352,15 @@ class MultiLeagueScheduleFetcher(QThread):
                 is_live = (state in ["LIVE", "CRIT"])
                 is_final = (state in ["FINAL", "OFF"])
 
+                kickoff_ts = 0
+                utc_start = g.get("startTimeUTC")
+                if utc_start:
+                    try:
+                        dt = datetime.fromisoformat(utc_start.replace("Z", "+00:00"))
+                        kickoff_ts = dt.timestamp()
+                    except Exception:
+                        pass
+
                 if is_live:
                     clock = g.get("clock", {})
                     time_rem = clock.get("timeRemaining", "")
@@ -329,7 +369,6 @@ class MultiLeagueScheduleFetcher(QThread):
                 elif is_final:
                     status = "FINAL"
                 else:
-                    utc_start = g.get("startTimeUTC")
                     status = "Scheduled"
                     if utc_start:
                         try:
@@ -338,8 +377,10 @@ class MultiLeagueScheduleFetcher(QThread):
                         except Exception:
                             pass
 
-                away_logo = f"https://a.espncdn.com/i/teamlogos/nhl/500/{away_code}.png" if away_code else None
-                home_logo = f"https://a.espncdn.com/i/teamlogos/nhl/500/{home_code}.png" if home_code else None
+                away_code_espn = ESPN_LOGO_OVERRIDES.get(away_code, away_code)
+                home_code_espn = ESPN_LOGO_OVERRIDES.get(home_code, home_code)
+                away_logo = f"https://a.espncdn.com/i/teamlogos/nhl/500/{away_code_espn}.png" if away_code else None
+                home_logo = f"https://a.espncdn.com/i/teamlogos/nhl/500/{home_code_espn}.png" if home_code else None
 
                 date_query = self.target_date.strftime("%B %d %Y")
                 recap_query = urllib.parse.quote(f"{away_name} vs {home_name} condensed game recap {date_query}")
@@ -361,14 +402,14 @@ class MultiLeagueScheduleFetcher(QThread):
                     "embed_url": watch_url,
                     "recap_url": recap_url,
                     "channels": 1,
-                    "kickoff_ts": 0,
+                    "kickoff_ts": kickoff_ts,
                     "is_ncaa": False
                 })
         except Exception:
             pass
         return games
 
-    def fetch_espn_ncaa(self, headers):
+    def fetch_espn_ncaa(self, headers, stream_map):
         games = []
         try:
             date_param = self.target_date.strftime("%Y%m%d")
@@ -396,12 +437,29 @@ class MultiLeagueScheduleFetcher(QThread):
                 is_live = (state == "in")
                 is_final = (state == "post")
 
+                kickoff_ts = 0
+                date_iso = ev.get("date")
+                if date_iso:
+                    try:
+                        dt = datetime.fromisoformat(date_iso.replace("Z", "+00:00"))
+                        kickoff_ts = dt.timestamp()
+                    except Exception:
+                        pass
+
+                # Filter out games that don't match the selected local date
+                if kickoff_ts:
+                    ev_date = self.get_event_local_date(kickoff_ts)
+                    if ev_date != self.target_date:
+                        continue
+
                 home_name = home_team.get("displayName", "Home")
                 away_name = away_team.get("displayName", "Away")
 
                 date_query = self.target_date.strftime("%B %d %Y")
                 recap_query = urllib.parse.quote(f"{away_name} vs {home_name} hockey highlights {date_query}")
                 recap_url = f"https://www.youtube.com/results?search_query={recap_query}" if is_final else None
+
+                watch_url = self.find_matchora_url(home_name, away_name, stream_map)
 
                 games.append({
                     "id": ev.get("id"),
@@ -415,10 +473,10 @@ class MultiLeagueScheduleFetcher(QThread):
                     "status": short_detail,
                     "is_live": is_live,
                     "is_final": is_final,
-                    "embed_url": "http://onhockey.tv/",
+                    "embed_url": watch_url,
                     "recap_url": recap_url,
-                    "channels": 0,
-                    "kickoff_ts": 0,
+                    "channels": 1 if "matchora.to" in watch_url else 0,
+                    "kickoff_ts": kickoff_ts,
                     "is_ncaa": True
                 })
         except Exception:
@@ -428,92 +486,153 @@ class MultiLeagueScheduleFetcher(QThread):
     def fetch_matchora(self, headers):
         games = []
         try:
-            date_str = self.target_date.strftime("%Y-%m-%d")
-            url = f"{API_BASE}/schedule?date={date_str}&watchable=1"
-            resp = requests.get(url, headers=headers, timeout=8)
-            if resp.status_code != 200:
-                return []
+            # Query target date and the following UTC day to bridge late evening North American matches
+            dates_to_query = [self.target_date.strftime("%Y-%m-%d")]
+            offset_hours = TIMEZONE_OFFSETS.get(self.tz_name)
+            if offset_hours is None or offset_hours <= 0:
+                dates_to_query.append((self.target_date + timedelta(days=1)).strftime("%Y-%m-%d"))
+            if offset_hours is not None and offset_hours > 0:
+                dates_to_query.append((self.target_date - timedelta(days=1)).strftime("%Y-%m-%d"))
 
-            for ev in resp.json().get("events", []):
-                league_raw = str(ev.get("league") or "").lower()
-                home_raw = str(ev.get("home") or "").lower()
-                away_raw = str(ev.get("away") or "").lower()
+            dates_to_query = list(dict.fromkeys(dates_to_query))
+            now_ts = datetime.now().timestamp()
+            seen_matchora = {}
 
-                if "nhl" in league_raw or any(t.lower() in home_raw for t in NHL_FRANCHISES.values()) or any(t.lower() in away_raw for t in NHL_FRANCHISES.values()):
+            for d_str in dates_to_query:
+                url = f"{API_BASE}/schedule?date={d_str}"
+                resp = requests.get(url, headers=headers, timeout=8)
+                if resp.status_code != 200:
                     continue
 
-                is_ahl = "ahl" in league_raw or "american hockey league" in league_raw
-                is_echl = "echl" in league_raw
-                is_sphl = "sphl" in league_raw or "southern professional" in league_raw
-                is_qmjhl = "qmjhl" in league_raw or "quebec major" in league_raw or "lhjmq" in league_raw
-                is_juniors = any(k in league_raw for k in ["ohl", "whl", "chl"])
-                is_shl = any(k in league_raw for k in ["shl", "swedish", "allsvenskan", "sweden"])
-                is_liiga = "liiga" in league_raw or "mestis" in league_raw or "finland" in league_raw
-                is_swiss = any(k in league_raw for k in ["national league", "swiss", "nla", "switzerland"])
+                for ev in resp.json().get("events", []):
+                    league_raw = str(ev.get("league") or "").lower()
+                    home_raw = str(ev.get("home") or "").lower()
+                    away_raw = str(ev.get("away") or "").lower()
+                    sport_raw = str(ev.get("sport") or "").lower()
 
-                is_hockey = (is_ahl or is_echl or is_sphl or is_qmjhl or is_juniors or is_shl or is_liiga or is_swiss or "hockey" in league_raw)
-                if not is_hockey:
-                    continue
+                    # Ignore NHL (official API handles it)
+                    if "nhl" in league_raw or any(t.lower() in home_raw for t in NHL_FRANCHISES.values()) or any(t.lower() in away_raw for t in NHL_FRANCHISES.values()):
+                        continue
 
-                if self.filter_key == "AHL" and not is_ahl: continue
-                elif self.filter_key == "ECHL" and not is_echl: continue
-                elif self.filter_key == "SPHL" and not is_sphl: continue
-                elif self.filter_key == "QMJHL" and not is_qmjhl: continue
-                elif self.filter_key == "OHL / WHL Juniors" and not is_juniors: continue
-                elif self.filter_key == "Swedish Hockey League (SHL)" and not is_shl: continue
-                elif self.filter_key == "Finnish Liiga" and not is_liiga: continue
-                elif self.filter_key == "Swiss National League (NL)" and not is_swiss: continue
+                    # Ignore NCAA/college matches (clean ESPN NCAA API handles it)
+                    if "ncaa" in league_raw or "college" in league_raw or "university" in league_raw:
+                        continue
 
-                is_live = bool(ev.get("live"))
-                kickoff = ev.get("kickoff")
-                time_str = "Scheduled"
-                if kickoff:
-                    try:
-                        utc_dt = datetime.fromtimestamp(float(kickoff), tz=timezone.utc)
-                        time_str = self.format_time(utc_dt)
-                    except Exception:
-                        pass
+                    # Exclude non-hockey sports
+                    non_hockey = ["tennis", "atp", "wta", "indoors", "basketball", "soccer", "football", "nfl", "nba", "baseball"]
+                    if any(bad in league_raw for bad in non_hockey) or any(bad in sport_raw for bad in non_hockey):
+                        continue
 
-                minute_val = ev.get("minute")
-                status_label = f"{minute_val}m" if (is_live and minute_val) else ("LIVE" if is_live else time_str)
-                score_str = ev.get("score") or "0-0"
-                scores = score_str.split("-") if "-" in score_str else ["0", "0"]
+                    is_ahl = "ahl" in league_raw or "american hockey league" in league_raw
+                    is_echl = "echl" in league_raw
+                    is_sphl = "sphl" in league_raw or "southern professional" in league_raw
+                    is_qmjhl = "qmjhl" in league_raw or "quebec major" in league_raw or "lhjmq" in league_raw
+                    is_juniors = any(k in league_raw for k in ["ohl", "whl", "chl", "junior"])
+                    is_shl = ("shl" in league_raw or "swedish hockey league" in league_raw or "allsvenskan" in league_raw)
+                    is_liiga = "liiga" in league_raw or "mestis" in league_raw
+                    is_swiss = ("swiss national league" in league_raw or "national league" in league_raw or "nla" in league_raw) and ("swiss" in league_raw or "switzerland" in league_raw or "nl" in league_raw)
 
-                if is_echl: league_label = "ECHL"
-                elif is_sphl: league_label = "SPHL"
-                elif is_qmjhl: league_label = "QMJHL"
-                elif is_juniors: league_label = "OHL / WHL Juniors"
-                elif is_shl: league_label = "Swedish SHL"
-                elif is_liiga: league_label = "Finnish Liiga"
-                elif is_swiss: league_label = "Swiss NL"
-                elif is_ahl: league_label = "AHL"
-                else: league_label = "Other Hockey"
+                    is_hockey = (is_ahl or is_echl or is_sphl or is_qmjhl or is_juniors or is_shl or is_liiga or is_swiss or "hockey" in league_raw or "hockey" in sport_raw)
+                    if not is_hockey:
+                        continue
 
-                is_final = (status_label in ["FT", "FINAL"])
-                h_name = ev.get("home", "Home")
-                a_name = ev.get("away", "Away")
-                date_query = self.target_date.strftime("%B %d %Y")
-                recap_query = urllib.parse.quote(f"{a_name} vs {h_name} highlights {date_query}")
-                recap_url = f"https://www.youtube.com/results?search_query={recap_query}" if is_final else None
+                    if self.filter_key == "AHL" and not is_ahl: continue
+                    elif self.filter_key == "ECHL" and not is_echl: continue
+                    elif self.filter_key == "SPHL" and not is_sphl: continue
+                    elif self.filter_key == "QMJHL" and not is_qmjhl: continue
+                    elif self.filter_key == "OHL / WHL Juniors" and not is_juniors: continue
+                    elif self.filter_key == "Swedish Hockey League (SHL)" and not is_shl: continue
+                    elif self.filter_key == "Finnish Liiga" and not is_liiga: continue
+                    elif self.filter_key == "Swiss National League (NL)" and not is_swiss: continue
 
-                games.append({
-                    "id": str(ev.get("id")),
-                    "home": h_name,
-                    "away": a_name,
-                    "home_logo": ev.get("home_badge") or ev.get("home_logo"),
-                    "away_logo": ev.get("away_badge") or ev.get("away_logo"),
-                    "home_score": scores[0].strip(),
-                    "away_score": scores[1].strip(),
-                    "league": league_label,
-                    "status": status_label,
-                    "is_live": is_live,
-                    "is_final": is_final,
-                    "embed_url": ev.get("embed_url") or f"https://matchora.to/embed/match/{ev.get('id')}",
-                    "recap_url": recap_url,
-                    "channels": ev.get("channel_count", 1),
-                    "kickoff_ts": float(kickoff) if kickoff else 0,
-                    "is_ncaa": False
-                })
+                    kickoff = ev.get("kickoff")
+                    kickoff_ts = float(kickoff) if kickoff else 0
+
+                    # Strictly enforce local calendar day match
+                    if kickoff_ts:
+                        ev_local_date = self.get_event_local_date(kickoff_ts)
+                        if ev_local_date != self.target_date:
+                            continue
+
+                    is_live = bool(ev.get("live"))
+                    time_str = "Scheduled"
+                    if kickoff:
+                        try:
+                            utc_dt = datetime.fromtimestamp(kickoff_ts, tz=timezone.utc)
+                            time_str = self.format_time(utc_dt)
+                        except Exception:
+                            pass
+
+                    minute_val = str(ev.get("minute") or "").strip().upper()
+                    raw_status = str(ev.get("status") or "").strip().upper()
+
+                    if is_live and minute_val and minute_val not in ["FT", "ENDED"]:
+                        status_label = f"{minute_val}m"
+                    elif is_live:
+                        status_label = "LIVE"
+                    elif raw_status in ["FT", "FINAL", "ENDED", "POST", "FINISHED"]:
+                        status_label = "FINAL"
+                    else:
+                        status_label = time_str
+
+                    time_since_start = now_ts - kickoff_ts if kickoff_ts else 0
+                    is_overdue = (kickoff_ts > 0 and time_since_start > 12600 and not is_live)
+                    is_final = (status_label in ["FT", "FINAL", "ENDED", "FINISHED"]) or is_overdue
+                    if is_final:
+                        status_label = "FINAL"
+
+                    score_str = ev.get("score") or "0-0"
+                    scores = score_str.split("-") if "-" in score_str else ["0", "0"]
+
+                    if is_echl: league_label = "ECHL"
+                    elif is_sphl: league_label = "SPHL"
+                    elif is_qmjhl: league_label = "QMJHL"
+                    elif is_juniors: league_label = "OHL / WHL Juniors"
+                    elif is_shl: league_label = "Swedish SHL"
+                    elif is_liiga: league_label = "Finnish Liiga"
+                    elif is_swiss: league_label = "Swiss NL"
+                    elif is_ahl: league_label = "AHL"
+                    else: league_label = "Other Hockey"
+
+                    h_name = ev.get("home", "Home")
+                    a_name = ev.get("away", "Away")
+
+                    # Deduplication key to prevent repeated feeds
+                    dedup_key = (league_label, clean_team_name(a_name), clean_team_name(h_name))
+                    if dedup_key in seen_matchora:
+                        existing = seen_matchora[dedup_key]
+                        if not existing.get("is_live") and is_live:
+                            existing["is_live"] = True
+                            existing["status"] = status_label
+                        if ev.get("embed_url") and "onhockey" not in str(ev.get("embed_url")):
+                            existing["embed_url"] = ev.get("embed_url")
+                        existing["channels"] = existing.get("channels", 1) + 1
+                        continue
+
+                    date_query = self.target_date.strftime("%B %d %Y")
+                    recap_query = urllib.parse.quote(f"{a_name} vs {h_name} highlights {date_query}")
+                    recap_url = f"https://www.youtube.com/results?search_query={recap_query}" if is_final else None
+
+                    game_item = {
+                        "id": str(ev.get("id")),
+                        "home": h_name,
+                        "away": a_name,
+                        "home_logo": ev.get("home_badge") or ev.get("home_logo"),
+                        "away_logo": ev.get("away_badge") or ev.get("away_logo"),
+                        "home_score": scores[0].strip(),
+                        "away_score": scores[1].strip(),
+                        "league": league_label,
+                        "status": status_label,
+                        "is_live": is_live and not is_final,
+                        "is_final": is_final,
+                        "embed_url": ev.get("embed_url") or f"https://matchora.to/embed/match/{ev.get('id')}",
+                        "recap_url": recap_url,
+                        "channels": ev.get("channel_count", 1),
+                        "kickoff_ts": kickoff_ts,
+                        "is_ncaa": False
+                    }
+                    seen_matchora[dedup_key] = game_item
+                    games.append(game_item)
         except Exception:
             pass
         return games
@@ -526,22 +645,31 @@ class MultiLeagueScheduleFetcher(QThread):
 
             if self.filter_key == "All Hockey":
                 combined_games.extend(self.fetch_nhl_official(headers, stream_map))
-                combined_games.extend(self.fetch_espn_ncaa(headers))
+                combined_games.extend(self.fetch_espn_ncaa(headers, stream_map))
                 combined_games.extend(self.fetch_matchora(headers))
             elif self.filter_key == "NHL":
                 combined_games.extend(self.fetch_nhl_official(headers, stream_map))
             elif self.filter_key == "NCAA Men's D1 Hockey":
-                combined_games.extend(self.fetch_espn_ncaa(headers))
+                combined_games.extend(self.fetch_espn_ncaa(headers, stream_map))
             else:
                 combined_games.extend(self.fetch_matchora(headers))
 
-            combined_games.sort(
+            # Global deduplication across all sources
+            unique_games = []
+            seen_keys = set()
+            for g in combined_games:
+                key = (g["league"], clean_team_name(g["away"]), clean_team_name(g["home"]))
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    unique_games.append(g)
+
+            unique_games.sort(
                 key=lambda g: (
                     LEAGUE_PRIORITY.get(g["league"], 50),
                     not g["is_live"]
                 )
             )
-            self.games_loaded.emit(combined_games)
+            self.games_loaded.emit(unique_games)
         except Exception as e:
             self.fetch_error.emit(str(e))
 
@@ -754,18 +882,19 @@ class GameCard(QFrame):
         main_row = QHBoxLayout()
         main_row.setSpacing(16)
 
-        # Status Pill Badge
         status_box = QVBoxLayout()
         status_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_status = QLabel(f"● {game['status']}" if game["is_live"] else game["status"])
         lbl_status.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
         
+        is_final = game.get("is_final", False) or (game.get("status") == "FINAL")
+
         if game["is_live"]:
             lbl_status.setStyleSheet("""
                 background-color: #064e3b; color: #34d399; 
                 padding: 4px 10px; border-radius: 10px; border: 1px solid #059669;
             """)
-        elif game.get("is_final"):
+        elif is_final:
             lbl_status.setStyleSheet("""
                 background-color: #27272a; color: #A1A1AA; 
                 padding: 4px 10px; border-radius: 10px;
@@ -778,7 +907,6 @@ class GameCard(QFrame):
         status_box.addWidget(lbl_status)
         main_row.addLayout(status_box)
 
-        # Teams & Badges
         teams_layout = QHBoxLayout()
         teams_layout.setSpacing(12)
 
@@ -805,7 +933,7 @@ class GameCard(QFrame):
         lbl_home.setStyleSheet("color: #F8FAFC; border: none;")
         teams_layout.addWidget(lbl_home)
 
-        has_score = (game["away_score"] != "0" or game["home_score"] != "0" or game["is_live"] or game.get("is_final"))
+        has_score = (game["away_score"] != "0" or game["home_score"] != "0" or game["is_live"] or is_final)
         if has_score:
             score_text = f"{game['away_score']} - {game['home_score']}"
             lbl_score = QLabel(score_text)
@@ -816,40 +944,57 @@ class GameCard(QFrame):
         teams_layout.addStretch()
         main_row.addLayout(teams_layout, stretch=1)
 
-        # Action Buttons
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
 
-        if not self.is_past_date and not game.get("is_final"):
-            # Multi-Option Watch Dropdown Button
-            self.btn_watch = QPushButton("Watch ▾")
-            self.btn_watch.setStyleSheet("""
-                QPushButton {
-                    background-color: #10B981; color: #05070a;
-                    font-weight: 800; font-size: 11px; padding: 7px 18px;
-                    border-radius: 6px; border: none;
-                }
-                QPushButton:hover { background-color: #059669; color: #FFFFFF; }
-            """)
+        is_live = game.get("is_live", False)
+        kickoff_ts = game.get("kickoff_ts", 0)
 
-            # Setup Popup Menu for the button
-            stream_menu = QMenu(self)
-            
-            act_vlc = QAction("▶ VLC Player (Direct HLS)", self)
-            match_title = f"{game['away']} vs {game['home']}"
-            act_vlc.triggered.connect(lambda checked, u=game["embed_url"], t=match_title: resolve_and_launch_vlc(u, t))
-            stream_menu.addAction(act_vlc)
+        starts_soon = False
+        if kickoff_ts > 0:
+            time_until_start = kickoff_ts - datetime.now().timestamp()
+            if time_until_start <= 900:
+                starts_soon = True
 
-            act_embed = QAction("🌐 Matchora Web Embed", self)
-            act_embed.triggered.connect(lambda checked, u=game["embed_url"]: open_url(u))
-            stream_menu.addAction(act_embed)
+        if not self.is_past_date and not is_final:
+            if is_live or starts_soon:
+                self.btn_watch = QPushButton("Watch ▾")
+                self.btn_watch.setStyleSheet("""
+                    QPushButton {
+                        background-color: #10B981; color: #05070a;
+                        font-weight: 800; font-size: 11px; padding: 7px 18px;
+                        border-radius: 6px; border: none;
+                    }
+                    QPushButton:hover { background-color: #059669; color: #FFFFFF; }
+                """)
 
-            act_onhockey = QAction("🏒 OnHockey Match Stream", self)
-            act_onhockey.triggered.connect(lambda checked: open_url("http://onhockey.tv/"))
-            stream_menu.addAction(act_onhockey)
+                stream_menu = QMenu(self)
+                act_vlc = QAction("▶ VLC Player (Direct HLS)", self)
+                match_title = f"{game['away']} vs {game['home']}"
+                act_vlc.triggered.connect(lambda checked, u=game["embed_url"], t=match_title: resolve_and_launch_vlc(u, t))
+                stream_menu.addAction(act_vlc)
 
-            self.btn_watch.setMenu(stream_menu)
-            btn_layout.addWidget(self.btn_watch)
+                act_embed = QAction("🌐 Matchora Web Embed", self)
+                act_embed.triggered.connect(lambda checked, u=game["embed_url"]: open_url(u))
+                stream_menu.addAction(act_embed)
+
+                act_onhockey = QAction("🏒 OnHockey Match Stream", self)
+                act_onhockey.triggered.connect(lambda checked: open_url("http://onhockey.tv/"))
+                stream_menu.addAction(act_onhockey)
+
+                self.btn_watch.setMenu(stream_menu)
+                btn_layout.addWidget(self.btn_watch)
+            else:
+                btn_pre = QPushButton(f"Starts {game['status']}")
+                btn_pre.setEnabled(False)
+                btn_pre.setStyleSheet("""
+                    QPushButton {
+                        background-color: #121824; color: #64748B;
+                        font-weight: 700; font-size: 11px; padding: 7px 14px;
+                        border-radius: 6px; border: 1px solid #1c2638;
+                    }
+                """)
+                btn_layout.addWidget(btn_pre)
         else:
             if game.get("recap_url"):
                 btn_recap = QPushButton("▶ Recap")
@@ -923,11 +1068,10 @@ class HockeyHubBeta(QMainWindow):
         self.thread = None
         self.active_date = datetime.now().date()
 
-        # Persistent user settings (Registry / Config File)
-        self.settings = QSettings("HLH", "HockeyLiveHubBeta")
+        self.settings = QSettings("HLH", "HockeyLiveHub")
         self.init_timezone()
 
-        self.setWindowTitle("Hockey Live Hub (BETA)")
+        self.setWindowTitle("Hockey Live Hub")
         self.resize(980, 720)
         self.setStyleSheet(STYLESHEET)
         self.init_icon()
@@ -956,7 +1100,6 @@ class HockeyHubBeta(QMainWindow):
         btn_refresh.clicked.connect(self.load_schedule)
         header_bar.addWidget(btn_refresh)
 
-        # Timezone settings button
         self.btn_tz = QPushButton(f"⚙ {self.get_tz_short_label()}")
         self.btn_tz.setObjectName("NavBtn")
         self.btn_tz.setToolTip("Click to change timezone")
@@ -999,13 +1142,17 @@ class HockeyHubBeta(QMainWindow):
         self.scroll.setWidget(self.card_container)
         main_layout.addWidget(self.scroll)
 
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.setInterval(30000)
+        self.refresh_timer.timeout.connect(self.background_refresh)
+        self.refresh_timer.start()
+
         self.update_date_label()
         self.load_schedule()
 
     def init_timezone(self):
         saved_tz = self.settings.value("timezone", None)
         if not saved_tz:
-            # First launch: Prompt the user
             dialog = TimezoneSelectionDialog(self)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 saved_tz = dialog.get_selected_timezone()
@@ -1063,6 +1210,10 @@ class HockeyHubBeta(QMainWindow):
         self.update_date_label()
         self.load_schedule()
 
+    def background_refresh(self):
+        if self.active_date == datetime.now().date():
+            self.load_schedule(silent=True)
+
     def clear_cards(self):
         while self.card_layout.count():
             item = self.card_layout.takeAt(0)
@@ -1071,12 +1222,13 @@ class HockeyHubBeta(QMainWindow):
                 widget.setParent(None)
                 widget.deleteLater()
 
-    def load_schedule(self):
+    def load_schedule(self, silent=False):
         if self.thread is not None and self.thread.isRunning():
-            self.thread.quit()
-            self.thread.wait()
+            return
 
-        self.clear_cards()
+        if not silent:
+            self.clear_cards()
+
         selected = self.league_combo.currentText()
         self.thread = MultiLeagueScheduleFetcher(selected, self.active_date, self.current_tz)
         self.thread.games_loaded.connect(self.populate_games)
@@ -1087,6 +1239,9 @@ class HockeyHubBeta(QMainWindow):
         QMessageBox.warning(self, "Fetch Error", f"Could not load schedule:\n{err_msg}")
 
     def populate_games(self, games):
+        scroll_bar = self.scroll.verticalScrollBar()
+        current_scroll = scroll_bar.value()
+
         self.clear_cards()
 
         if not games:
@@ -1115,6 +1270,7 @@ class HockeyHubBeta(QMainWindow):
                 self.card_layout.addWidget(GameCard(game, is_past_date=is_past))
 
         self.card_layout.addStretch()
+        QTimer.singleShot(50, lambda: scroll_bar.setValue(current_scroll))
 
 
 if __name__ == "__main__":

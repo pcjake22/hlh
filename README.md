@@ -4,6 +4,8 @@
 
 **A lightweight, ad-free desktop scoreboard and live stream launcher for hockey fans.**
 
+![Hockey Live Hub Preview](assets/preview.png)
+
 [![Download Latest Release](https://img.shields.io/github/v/release/pcjake22/hlh?color=10B981&label=Download%20.exe&logo=windows&style=for-the-badge)](https://github.com/pcjake22/hlh/releases/latest)
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)

@@ -12,7 +12,10 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 
 from PyQt6 import sip
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings, QTimer, QDate, QRunnable, QThreadPool, QObject
+from PyQt6.QtCore import (
+    Qt, QThread, pyqtSignal, QSettings, QTimer, QDate, 
+    QRunnable, QThreadPool, QObject, QPointF
+)
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QGridLayout, QLabel, QPushButton, QScrollArea, QFrame, QMessageBox, 
@@ -331,104 +334,105 @@ class MomentumWaveWidget(QWidget):
         super().__init__(parent)
         self.game = game or {}
         self.setFixedHeight(85)
-        self._cached_path = None
-        self._last_w = 0
 
     def paintEvent(self, event):
-        w = self.width()
-        h = self.height()
-        if w < 50 or h < 30:
-            return
-
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        mid_y = h / 2.0
-        left_m = 20.0
-        right_m = 15.0
-        chart_w = max(10.0, float(w - left_m - right_m))
-
-        pen_base = QPen(QColor("#242d3d"), 1)
-        painter.setPen(pen_base)
-        painter.drawLine(int(left_m), int(mid_y), int(w - right_m), int(mid_y))
-
-        p1_x = left_m + chart_w * 0.33
-        p2_x = left_m + chart_w * 0.66
-
-        pen_dash = QPen(QColor("#1f2838"), 1, Qt.PenStyle.DashLine)
-        painter.setPen(pen_dash)
-        painter.drawLine(int(p1_x), 6, int(p1_x), int(h - 12))
-        painter.drawLine(int(p2_x), 6, int(p2_x), int(h - 12))
-
-        raw_away = str(self.game.get("away_score") or "0").strip()
-        raw_home = str(self.game.get("home_score") or "0").strip()
         try:
-            a_s = int(re.sub(r'[^0-9]', '', raw_away) or 0)
-        except Exception:
-            a_s = 0
-        try:
-            h_s = int(re.sub(r'[^0-9]', '', raw_home) or 0)
-        except Exception:
-            h_s = 0
+            w = self.width()
+            h = self.height()
+            if w < 50 or h < 30:
+                return
 
-        is_live = bool(self.game.get("is_live", False))
-        is_final = bool(self.game.get("is_final", False))
-        has_score = (a_s > 0 or h_s > 0 or is_live or is_final)
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        if not has_score:
-            pen_flat = QPen(QColor("#334155"), 1.5)
-            painter.setPen(pen_flat)
+            mid_y = h / 2.0
+            left_m = 20.0
+            right_m = 15.0
+            chart_w = max(10.0, float(w - left_m - right_m))
+
+            pen_base = QPen(QColor("#242d3d"), 1)
+            painter.setPen(pen_base)
             painter.drawLine(int(left_m), int(mid_y), int(w - right_m), int(mid_y))
-            painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Medium))
-            painter.setPen(QColor("#64748B"))
-            painter.drawText(int(left_m + chart_w * 0.35), int(mid_y - 4), "Match Scheduled")
-            return
 
-        game_progress = 0.65 if is_live else 1.0
-        active_w = chart_w * game_progress
-        points = []
-        step_x = 12.0
-        curr_x = left_m
-        t = 0.0
+            p1_x = left_m + chart_w * 0.33
+            p2_x = left_m + chart_w * 0.66
 
-        seed_val = str(self.game.get("id") or self.game.get("home") or "hockey")
-        seed = abs(hash(seed_val)) % 100
-        bias = (a_s - h_s) * 4.0
+            pen_dash = QPen(QColor("#1f2838"), 1, Qt.PenStyle.DashLine)
+            painter.setPen(pen_dash)
+            painter.drawLine(int(p1_x), 6, int(p1_x), int(h - 12))
+            painter.drawLine(int(p2_x), 6, int(p2_x), int(h - 12))
 
-        while curr_x <= (left_m + active_w):
-            wave1 = math.sin(t * 0.5 + seed) * 12.0
-            wave2 = math.cos(t * 0.9 + seed) * 7.0
-            wave3 = math.sin(t * 1.8) * 3.0
-            y_offset = (wave1 + wave2 + wave3) + bias
-            y_clamped = max(-26.0, min(26.0, y_offset))
-            points.append(QPointF(curr_x, mid_y - y_clamped))
-            t += 0.8
-            curr_x += step_x
+            raw_away = str(self.game.get("away_score") or "0").strip()
+            raw_home = str(self.game.get("home_score") or "0").strip()
+            try:
+                a_s = int(re.sub(r'[^0-9]', '', raw_away) or 0)
+            except Exception:
+                a_s = 0
+            try:
+                h_s = int(re.sub(r'[^0-9]', '', raw_home) or 0)
+            except Exception:
+                h_s = 0
 
-        if len(points) >= 2:
-            curve_path = QPainterPath()
-            curve_path.moveTo(points[0])
-            for i in range(len(points) - 1):
-                p0 = points[i]
-                p1 = points[i + 1]
-                c1 = QPointF((p0.x() + p1.x()) / 2.0, p0.y())
-                c2 = QPointF((p0.x() + p1.x()) / 2.0, p1.y())
-                curve_path.cubicTo(c1, c2, p1)
+            is_live = bool(self.game.get("is_live", False))
+            is_final = bool(self.game.get("is_final", False))
+            has_score = (a_s > 0 or h_s > 0 or is_live or is_final)
 
-            fill_path = QPainterPath(curve_path)
-            fill_path.lineTo(points[-1].x(), mid_y)
-            fill_path.lineTo(points[0].x(), mid_y)
-            fill_path.closeSubpath()
+            if not has_score:
+                pen_flat = QPen(QColor("#334155"), 1.5)
+                painter.setPen(pen_flat)
+                painter.drawLine(int(left_m), int(mid_y), int(w - right_m), int(mid_y))
+                painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Medium))
+                painter.setPen(QColor("#64748B"))
+                painter.drawText(int(left_m + chart_w * 0.35), int(mid_y - 4), "Match Scheduled")
+                return
 
-            grad = QLinearGradient(0, 10, 0, h - 20)
-            grad.setColorAt(0.0, QColor(16, 185, 129, 130))
-            grad.setColorAt(0.5, QColor(6, 78, 59, 60))
-            grad.setColorAt(1.0, QColor(16, 185, 129, 130))
-            painter.fillPath(fill_path, QBrush(grad))
+            game_progress = 0.65 if is_live else 1.0
+            active_w = chart_w * game_progress
+            points = []
+            step_x = 12.0
+            curr_x = left_m
+            t = 0.0
 
-            pen_wave = QPen(QColor("#E2E8F0"), 1.4)
-            painter.setPen(pen_wave)
-            painter.drawPath(curve_path)
+            seed_val = str(self.game.get("id") or self.game.get("home") or "hockey")
+            seed = abs(hash(seed_val)) % 100
+            bias = (a_s - h_s) * 4.0
+
+            while curr_x <= (left_m + active_w):
+                wave1 = math.sin(t * 0.5 + seed) * 12.0
+                wave2 = math.cos(t * 0.9 + seed) * 7.0
+                wave3 = math.sin(t * 1.8) * 3.0
+                y_offset = (wave1 + wave2 + wave3) + bias
+                y_clamped = max(-26.0, min(26.0, y_offset))
+                points.append(QPointF(float(curr_x), float(mid_y - y_clamped)))
+                t += 0.8
+                curr_x += step_x
+
+            if len(points) >= 2:
+                curve_path = QPainterPath()
+                curve_path.moveTo(points[0])
+                for i in range(len(points) - 1):
+                    p0 = points[i]
+                    p1 = points[i + 1]
+                    c1 = QPointF((p0.x() + p1.x()) / 2.0, p0.y())
+                    c2 = QPointF((p0.x() + p1.x()) / 2.0, p1.y())
+                    curve_path.cubicTo(c1, c2, p1)
+
+                fill_path = QPainterPath(curve_path)
+                fill_path.lineTo(points[-1].x(), mid_y)
+                fill_path.lineTo(points[0].x(), mid_y)
+                fill_path.closeSubpath()
+
+                grad = QLinearGradient(0, 10, 0, h - 20)
+                grad.setColorAt(0.0, QColor(16, 185, 129, 130))
+                grad.setColorAt(0.5, QColor(6, 78, 59, 60))
+                grad.setColorAt(1.0, QColor(16, 185, 129, 130))
+                painter.fillPath(fill_path, QBrush(grad))
+
+                pen_wave = QPen(QColor("#E2E8F0"), 1.4)
+                painter.setPen(pen_wave)
+                painter.drawPath(curve_path)
+        except Exception:
+            pass
 
 
 class InlineGamecastDrawer(QFrame):
@@ -840,7 +844,7 @@ def resolve_and_launch_vlc(embed_url, window_title="HLH Stream"):
         try:
             session = requests.Session()
             session.headers.update({
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Referer": "https://matchora.to/",
             })
             resp = session.get(embed_url, timeout=4)
@@ -950,7 +954,32 @@ class MultiLeagueScheduleFetcher(QThread):
             tz = timezone(timedelta(hours=offset_hours))
             return utc_dt.astimezone(tz).strftime("%I:%M %p")
 
-    def fetch_nhl_official(self, session):
+    def get_matchora_stream_map(self, session):
+        matchora_streams = []
+        try:
+            url = f"{API_BASE}/schedule?watchable=1"
+            resp = session.get(url, timeout=3.0)
+            if resp.status_code == 200:
+                for ev in resp.json().get("events", []):
+                    home = str(ev.get("home") or "").lower()
+                    away = str(ev.get("away") or "").lower()
+                    embed = ev.get("embed_url") or f"https://matchora.to/embed/match/{ev.get('id')}"
+                    matchora_streams.append({"home": home, "away": away, "embed": embed})
+        except Exception:
+            pass
+        return matchora_streams
+
+    def find_matchora_url(self, home_name, away_name, stream_map):
+        h_words = [w.lower() for w in home_name.split() if len(w) > 3]
+        a_words = [w.lower() for w in away_name.split() if len(w) > 3]
+        for item in stream_map:
+            h_match = any(w in item["home"] for w in h_words)
+            a_match = any(w in item["away"] for w in a_words)
+            if h_match or a_match:
+                return item["embed"]
+        return "http://onhockey.tv/"
+
+    def fetch_nhl_official(self, session, stream_map):
         games = []
         try:
             date_str = self.target_date.strftime("%Y-%m-%d")
@@ -1003,6 +1032,7 @@ class MultiLeagueScheduleFetcher(QThread):
                 date_query = self.target_date.strftime("%B %d %Y")
                 recap_query = urllib.parse.quote(f"{away_name} vs {home_name} condensed game recap {date_query}")
                 recap_url = f"https://www.youtube.com/results?search_query={recap_query}" if is_final else None
+                watch_url = self.find_matchora_url(home_name, away_name, stream_map)
 
                 games.append({
                     "id": str(g.get("id")),
@@ -1016,7 +1046,7 @@ class MultiLeagueScheduleFetcher(QThread):
                     "status": status,
                     "is_live": is_live,
                     "is_final": is_final,
-                    "embed_url": "http://onhockey.tv/",
+                    "embed_url": watch_url,
                     "recap_url": recap_url,
                     "channels": 1,
                     "kickoff_ts": kickoff_ts,
@@ -1026,7 +1056,7 @@ class MultiLeagueScheduleFetcher(QThread):
             pass
         return games
 
-    def fetch_espn_ncaa(self, session):
+    def fetch_espn_ncaa(self, session, stream_map):
         games = []
         try:
             date_param = self.target_date.strftime("%Y%m%d")
@@ -1074,6 +1104,7 @@ class MultiLeagueScheduleFetcher(QThread):
                 date_query = self.target_date.strftime("%B %d %Y")
                 recap_query = urllib.parse.quote(f"{away_name} vs {home_name} hockey highlights {date_query}")
                 recap_url = f"https://www.youtube.com/results?search_query={recap_query}" if is_final else None
+                watch_url = self.find_matchora_url(home_name, away_name, stream_map)
 
                 games.append({
                     "id": ev.get("id"),
@@ -1087,7 +1118,7 @@ class MultiLeagueScheduleFetcher(QThread):
                     "status": short_detail,
                     "is_live": is_live,
                     "is_final": is_final,
-                    "embed_url": "http://onhockey.tv/",
+                    "embed_url": watch_url,
                     "recap_url": recap_url,
                     "channels": 1,
                     "kickoff_ts": kickoff_ts,
@@ -1239,14 +1270,16 @@ class MultiLeagueScheduleFetcher(QThread):
 
             if self.is_aborted: return
 
+            stream_map = self.get_matchora_stream_map(session)
+
             if self.filter_key == "All Hockey":
-                combined_games.extend(self.fetch_nhl_official(session))
-                combined_games.extend(self.fetch_espn_ncaa(session))
+                combined_games.extend(self.fetch_nhl_official(session, stream_map))
+                combined_games.extend(self.fetch_espn_ncaa(session, stream_map))
                 combined_games.extend(self.fetch_matchora(session))
             elif self.filter_key == "NHL":
-                combined_games.extend(self.fetch_nhl_official(session))
+                combined_games.extend(self.fetch_nhl_official(session, stream_map))
             elif self.filter_key == "NCAA Men's D1 Hockey":
-                combined_games.extend(self.fetch_espn_ncaa(session))
+                combined_games.extend(self.fetch_espn_ncaa(session, stream_map))
             else:
                 combined_games.extend(self.fetch_matchora(session))
 
@@ -1530,7 +1563,6 @@ class HockeyHubBeta(QMainWindow):
 
                 for idx, game in enumerate(league_games):
                     card = GridGameCard(game, is_past_date=is_past)
-                    # AlignTop prevents neighboring cards from vertically expanding
                     grid.addWidget(card, idx // columns, idx % columns, Qt.AlignmentFlag.AlignTop)
 
                 self.card_layout.addWidget(grid_widget)
@@ -1542,7 +1574,6 @@ class HockeyHubBeta(QMainWindow):
 
             for idx, game in enumerate(games):
                 card = GridGameCard(game, is_past_date=is_past)
-                # AlignTop prevents neighboring cards from vertically expanding
                 grid.addWidget(card, idx // columns, idx % columns, Qt.AlignmentFlag.AlignTop)
 
             self.card_layout.addWidget(grid_widget)

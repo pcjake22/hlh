@@ -33,7 +33,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-CURRENT_VERSION = "v1.2.0"
+CURRENT_VERSION = "v1.2.1"
 GITHUB_REPO = "pcjake22/hlh"
 API_BASE = "https://matchora.to/api/v1"
 ESPN_NCAA_API = "https://site.api.espn.com/apis/site/v2/sports/hockey/mens-college-hockey/scoreboard"
@@ -80,61 +80,17 @@ ESPN_LOGO_OVERRIDES = {
 }
 
 LEAGUE_BRANDING = {
-    "NHL": {
-        "badge_text": "NHL",
-        "color": "#10B981",
-        "full_name": "NATIONAL HOCKEY LEAGUE"
-    },
-    "NCAA Men's D1": {
-        "badge_text": "NCAA",
-        "color": "#F59E0B",
-        "full_name": "NCAA MEN'S DIVISION I HOCKEY"
-    },
-    "AHL": {
-        "badge_text": "AHL",
-        "color": "#38BDF8",
-        "full_name": "AMERICAN HOCKEY LEAGUE"
-    },
-    "ECHL": {
-        "badge_text": "ECHL",
-        "color": "#EF4444",
-        "full_name": "ECHL PROFESSIONAL HOCKEY"
-    },
-    "SPHL": {
-        "badge_text": "SPHL",
-        "color": "#A855F7",
-        "full_name": "SOUTHERN PROFESSIONAL HOCKEY LEAGUE"
-    },
-    "QMJHL": {
-        "badge_text": "QMJHL",
-        "color": "#EC4899",
-        "full_name": "QUEBEC MARITIMES JUNIOR HOCKEY LEAGUE"
-    },
-    "OHL / WHL Juniors": {
-        "badge_text": "CHL",
-        "color": "#06B6D4",
-        "full_name": "CANADIAN HOCKEY LEAGUE (OHL / WHL)"
-    },
-    "Swedish SHL": {
-        "badge_text": "SHL",
-        "color": "#FACC15",
-        "full_name": "SWEDISH HOCKEY LEAGUE (SHL)"
-    },
-    "Finnish Liiga": {
-        "badge_text": "LIIGA",
-        "color": "#60A5FA",
-        "full_name": "FINNISH LIIGA"
-    },
-    "Swiss NL": {
-        "badge_text": "NL",
-        "color": "#F43F5E",
-        "full_name": "SWISS NATIONAL LEAGUE"
-    },
-    "Other Hockey": {
-        "badge_text": "HOCKEY",
-        "color": "#94A3B8",
-        "full_name": "OTHER HOCKEY COMPETITIONS"
-    }
+    "NHL": {"badge_text": "NHL", "color": "#10B981", "full_name": "NATIONAL HOCKEY LEAGUE"},
+    "NCAA Men's D1": {"badge_text": "NCAA", "color": "#F59E0B", "full_name": "NCAA MEN'S DIVISION I HOCKEY"},
+    "AHL": {"badge_text": "AHL", "color": "#38BDF8", "full_name": "AMERICAN HOCKEY LEAGUE"},
+    "ECHL": {"badge_text": "ECHL", "color": "#EF4444", "full_name": "ECHL PROFESSIONAL HOCKEY"},
+    "SPHL": {"badge_text": "SPHL", "color": "#A855F7", "full_name": "SOUTHERN PROFESSIONAL HOCKEY LEAGUE"},
+    "QMJHL": {"badge_text": "QMJHL", "color": "#EC4899", "full_name": "QUEBEC MARITIMES JUNIOR HOCKEY LEAGUE"},
+    "OHL / WHL Juniors": {"badge_text": "CHL", "color": "#06B6D4", "full_name": "CANADIAN HOCKEY LEAGUE (OHL / WHL)"},
+    "Swedish SHL": {"badge_text": "SHL", "color": "#FACC15", "full_name": "SWEDISH HOCKEY LEAGUE (SHL)"},
+    "Finnish Liiga": {"badge_text": "LIIGA", "color": "#60A5FA", "full_name": "FINNISH LIIGA"},
+    "Swiss NL": {"badge_text": "NL", "color": "#F43F5E", "full_name": "SWISS NATIONAL LEAGUE"},
+    "Other Hockey": {"badge_text": "HOCKEY", "color": "#94A3B8", "full_name": "OTHER HOCKEY COMPETITIONS"}
 }
 
 LEAGUE_CATEGORIES = [
@@ -505,6 +461,7 @@ class GridGameCard(QFrame):
         self.setObjectName("GridGameCard")
 
         self.league_name = str(self.game.get("league", "")).strip()
+        self.is_ncaa = self.league_name == "NCAA Men's D1"
         self.has_gamecast = self.league_name in ["NHL", "NCAA Men's D1"]
 
         self.setStyleSheet("""
@@ -524,7 +481,6 @@ class GridGameCard(QFrame):
         self.main_layout.setContentsMargins(14, 12, 14, 10)
         self.main_layout.setSpacing(10)
 
-        # 1. Status Pill & League Tag
         top_row = QHBoxLayout()
         is_final = self.game.get("is_final", False) or (self.game.get("status") == "FINAL")
         lbl_status = QLabel(f"● {self.game.get('status')}" if self.game.get("is_live") else self.game.get("status", "Scheduled"))
@@ -545,7 +501,6 @@ class GridGameCard(QFrame):
         top_row.addWidget(lbl_league)
         self.main_layout.addLayout(top_row)
 
-        # 2. Team Badges & Centered Score
         match_row = QHBoxLayout()
         match_row.setSpacing(10)
 
@@ -595,7 +550,6 @@ class GridGameCard(QFrame):
 
         self.main_layout.addLayout(match_row)
 
-        # 3. Action Shelf
         bottom_row = QHBoxLayout()
         
         if self.has_gamecast:
@@ -620,30 +574,49 @@ class GridGameCard(QFrame):
 
         if not self.is_past_date and not is_final:
             if is_live or starts_soon:
-                btn_watch = QPushButton("Watch ▾")
-                btn_watch.setStyleSheet("""
-                    QPushButton {
-                        background-color: #10B981; color: #05070a;
-                        font-weight: 800; font-size: 11px; padding: 5px 16px;
-                        border-radius: 5px; border: none;
-                    }
-                    QPushButton:hover { background-color: #059669; color: #fff; }
-                """)
-                menu = QMenu(self)
-                act_vlc = QAction("▶ VLC Player (Direct)", self)
-                act_vlc.triggered.connect(lambda ch, u=self.game.get("embed_url"), t=f"{self.game.get('away')} vs {self.game.get('home')}": resolve_and_launch_vlc(u, t))
-                menu.addAction(act_vlc)
+                if self.is_ncaa:
+                    # NCAA: Direct 1-click button opening OnHockey
+                    btn_onhockey = QPushButton("🏒 Open OnHockey", self)
+                    btn_onhockey.setStyleSheet("""
+                        QPushButton {
+                            background-color: #F59E0B; color: #05070a;
+                            font-weight: 800; font-size: 11px; padding: 5px 14px;
+                            border-radius: 5px; border: none;
+                        }
+                        QPushButton:hover { background-color: #D97706; color: #ffffff; }
+                    """)
+                    btn_onhockey.clicked.connect(lambda: open_url("https://onhockey.tv/"))
+                    bottom_row.addWidget(btn_onhockey)
+                else:
+                    # NHL / Other leagues: VLC & Web Stream menu
+                    btn_watch = QPushButton("Watch ▾")
+                    btn_watch.setStyleSheet("""
+                        QPushButton {
+                            background-color: #10B981; color: #05070a;
+                            font-weight: 800; font-size: 11px; padding: 5px 16px;
+                            border-radius: 5px; border: none;
+                        }
+                        QPushButton:hover { background-color: #059669; color: #fff; }
+                    """)
+                    menu = QMenu(self)
+                    title = f"{self.game.get('away')} vs {self.game.get('home')}"
 
-                act_embed = QAction("🌐 Web Stream", self)
-                act_embed.triggered.connect(lambda ch, u=self.game.get("embed_url"): open_url(u))
-                menu.addAction(act_embed)
+                    act_vlc = QAction("▶ VLC Player (Direct)", self)
+                    act_vlc.triggered.connect(lambda ch, u=self.game.get("embed_url"), t=title: resolve_and_launch_vlc(u, t))
+                    menu.addAction(act_vlc)
 
-                act_onhockey = QAction("🏒 OnHockey Fallback", self)
-                act_onhockey.triggered.connect(lambda ch: open_url("http://onhockey.tv/"))
-                menu.addAction(act_onhockey)
+                    act_embed = QAction("🌐 Web Stream", self)
+                    act_embed.triggered.connect(lambda ch, u=self.game.get("embed_url"): open_url(u))
+                    menu.addAction(act_embed)
 
-                btn_watch.setMenu(menu)
-                bottom_row.addWidget(btn_watch)
+                    menu.addSeparator()
+
+                    act_onhockey = QAction("🏒 OnHockey Fallback", self)
+                    act_onhockey.triggered.connect(lambda ch: open_url("https://onhockey.tv/"))
+                    menu.addAction(act_onhockey)
+
+                    btn_watch.setMenu(menu)
+                    bottom_row.addWidget(btn_watch)
             else:
                 btn_pre = QPushButton(f"Starts {self.game.get('status', 'Soon')}")
                 btn_pre.setEnabled(False)
@@ -840,7 +813,8 @@ def resolve_and_launch_vlc(embed_url, window_title="HLH Stream"):
     if not embed_url:
         return
 
-    if "matchora.to/embed/match/" in embed_url:
+    # 1. Matchora embed API token resolution
+    if "matchora.to/embed/" in embed_url:
         try:
             session = requests.Session()
             session.headers.update({
@@ -863,42 +837,55 @@ def resolve_and_launch_vlc(embed_url, window_title="HLH Stream"):
                     api_resp = session.get(api_url, timeout=4)
                     if api_resp.status_code == 200:
                         stream_m3u8 = api_resp.json().get("url")
-
                         if stream_m3u8 and ".m3u8" in stream_m3u8:
-                            vlc = shutil.which("vlc")
-                            if not vlc and sys.platform == "win32":
-                                for default_path in [
-                                    r"C:\Program Files\VideoLAN\VLC\vlc.exe",
-                                    r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe"
-                                ]:
-                                    if os.path.exists(default_path):
-                                        vlc = default_path
-                                        break
-                            elif not vlc and sys.platform == "darwin":
-                                mac_vlc = "/Applications/VLC.app/Contents/MacOS/VLC"
-                                if os.path.exists(mac_vlc):
-                                    vlc = mac_vlc
-                            elif not vlc and sys.platform.startswith("linux"):
-                                for default_path in ["/usr/bin/vlc", "/usr/local/bin/vlc"]:
-                                    if os.path.exists(default_path):
-                                        vlc = default_path
-                                        break
-
-                            if vlc:
-                                cmd = [
-                                    vlc,
-                                    stream_m3u8,
-                                    ":http-referrer=https://matchora.to/",
-                                    f"--meta-title={window_title}",
-                                    "--qt-minimal-view"
-                                ]
-                                creation_flag = 0x08000000 if sys.platform == "win32" else 0
-                                subprocess.Popen(cmd, creationflags=creation_flag)
-                                return
+                            _dispatch_vlc(stream_m3u8, referer="https://matchora.to/", window_title=window_title)
+                            return
         except Exception:
             pass
 
+    # 2. Raw .m3u8 link fallback
+    if ".m3u8" in embed_url:
+        _dispatch_vlc(embed_url, referer="https://matchora.to/", window_title=window_title)
+        return
+
+    # Fallback to browser
     open_url(embed_url)
+
+
+def _dispatch_vlc(m3u8_url, referer="https://matchora.to/", window_title="HLH Stream"):
+    vlc = shutil.which("vlc")
+    if not vlc and sys.platform == "win32":
+        for default_path in [
+            r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+            r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe",
+            os.path.expandvars(r"%ProgramFiles%\VideoLAN\VLC\vlc.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\VideoLAN\VLC\vlc.exe")
+        ]:
+            if os.path.exists(default_path):
+                vlc = default_path
+                break
+    elif not vlc and sys.platform == "darwin":
+        mac_vlc = "/Applications/VLC.app/Contents/MacOS/VLC"
+        if os.path.exists(mac_vlc):
+            vlc = mac_vlc
+    elif not vlc and sys.platform.startswith("linux"):
+        for default_path in ["/usr/bin/vlc", "/usr/local/bin/vlc"]:
+            if os.path.exists(default_path):
+                vlc = default_path
+                break
+
+    if vlc:
+        cmd = [
+            vlc,
+            m3u8_url,
+            f":http-referrer={referer}",
+            f"--meta-title={window_title}",
+            "--network-caching=1500"
+        ]
+        creation_flag = 0x08000000 if sys.platform == "win32" else 0
+        subprocess.Popen(cmd, creationflags=creation_flag)
+    else:
+        open_url(m3u8_url)
 
 
 def open_url(url):
@@ -955,7 +942,7 @@ class MultiLeagueScheduleFetcher(QThread):
             return utc_dt.astimezone(tz).strftime("%I:%M %p")
 
     def get_matchora_stream_map(self, session):
-        matchora_streams = []
+        streams = []
         try:
             url = f"{API_BASE}/schedule?watchable=1"
             resp = session.get(url, timeout=3.0)
@@ -964,20 +951,26 @@ class MultiLeagueScheduleFetcher(QThread):
                     home = str(ev.get("home") or "").lower()
                     away = str(ev.get("away") or "").lower()
                     embed = ev.get("embed_url") or f"https://matchora.to/embed/match/{ev.get('id')}"
-                    matchora_streams.append({"home": home, "away": away, "embed": embed})
+                    streams.append({"home": home, "away": away, "embed": embed})
         except Exception:
             pass
-        return matchora_streams
+        return streams
 
     def find_matchora_url(self, home_name, away_name, stream_map):
         h_words = [w.lower() for w in home_name.split() if len(w) > 3]
         a_words = [w.lower() for w in away_name.split() if len(w) > 3]
+
         for item in stream_map:
             h_match = any(w in item["home"] for w in h_words)
             a_match = any(w in item["away"] for w in a_words)
-            if h_match or a_match:
+            if h_match and a_match:
                 return item["embed"]
-        return "http://onhockey.tv/"
+
+        for item in stream_map:
+            if any(w in item["home"] or w in item["away"] for w in (h_words + a_words)):
+                return item["embed"]
+
+        return "https://onhockey.tv/"
 
     def fetch_nhl_official(self, session, stream_map):
         games = []
@@ -1056,7 +1049,7 @@ class MultiLeagueScheduleFetcher(QThread):
             pass
         return games
 
-    def fetch_espn_ncaa(self, session, stream_map):
+    def fetch_espn_ncaa(self, session):
         games = []
         try:
             date_param = self.target_date.strftime("%Y%m%d")
@@ -1104,7 +1097,6 @@ class MultiLeagueScheduleFetcher(QThread):
                 date_query = self.target_date.strftime("%B %d %Y")
                 recap_query = urllib.parse.quote(f"{away_name} vs {home_name} hockey highlights {date_query}")
                 recap_url = f"https://www.youtube.com/results?search_query={recap_query}" if is_final else None
-                watch_url = self.find_matchora_url(home_name, away_name, stream_map)
 
                 games.append({
                     "id": ev.get("id"),
@@ -1118,7 +1110,7 @@ class MultiLeagueScheduleFetcher(QThread):
                     "status": short_detail,
                     "is_live": is_live,
                     "is_final": is_final,
-                    "embed_url": watch_url,
+                    "embed_url": "https://onhockey.tv/",
                     "recap_url": recap_url,
                     "channels": 1,
                     "kickoff_ts": kickoff_ts,
@@ -1274,12 +1266,12 @@ class MultiLeagueScheduleFetcher(QThread):
 
             if self.filter_key == "All Hockey":
                 combined_games.extend(self.fetch_nhl_official(session, stream_map))
-                combined_games.extend(self.fetch_espn_ncaa(session, stream_map))
+                combined_games.extend(self.fetch_espn_ncaa(session))
                 combined_games.extend(self.fetch_matchora(session))
             elif self.filter_key == "NHL":
                 combined_games.extend(self.fetch_nhl_official(session, stream_map))
             elif self.filter_key == "NCAA Men's D1 Hockey":
-                combined_games.extend(self.fetch_espn_ncaa(session, stream_map))
+                combined_games.extend(self.fetch_espn_ncaa(session))
             else:
                 combined_games.extend(self.fetch_matchora(session))
 
